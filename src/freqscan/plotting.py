@@ -78,8 +78,6 @@ def add_freq_hint(fig, ax_wf):
 
 
 def run(backend: SDRBackend, waterfall_rows: int) -> None:
-    backend.start()
-
     n = len(backend.channels)
     fig, axes = plt.subplots(
         2, n, figsize=(11 * n, 8), gridspec_kw={"height_ratios": [1, 2]}, squeeze=False
@@ -98,14 +96,14 @@ def run(backend: SDRBackend, waterfall_rows: int) -> None:
 
         ax_spec.set_xlabel("Frequency (MHz)")
         ax_spec.set_ylabel("Power (dBm)")
-        ax_spec.set_title(f"Spectrum — {channel.label}")
+        ax_spec.set_title(channel.label)
         ax_spec.grid(True, alpha=0.3)
         (line,) = ax_spec.plot([], [], lw=1, color="lime")
         lines.append(line)
 
         ax_wf.set_xlabel("Frequency (MHz)")
         ax_wf.set_ylabel("Time (newest at top)")
-        ax_wf.set_title(f"Waterfall — {channel.label}")
+        ax_wf.set_title(channel.label)
         wf_img = ax_wf.imshow(
             np.full((waterfall_rows, 1), np.nan),
             aspect="auto",
