@@ -4,3 +4,12 @@ __pycache__/
 .pytest_cache/
 .venv/
 .env
+
+# Terraform (terraform/) — state contains the producer IAM user's plaintext
+# secret access key, treat it like a credentials file.
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/terraform.tfvars
+terraform/*.auto.tfvars
+terraform/crash.log

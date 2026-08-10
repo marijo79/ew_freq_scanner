@@ -5,6 +5,8 @@ from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass, field
 
+from freqscan.streaming.kafka_publisher import KafkaSignalPublisher
+
 
 @dataclass
 class SweepState:
@@ -23,6 +25,7 @@ class Channel:
 
 class SDRBackend(ABC):
     channels: list[Channel]
+    publisher: KafkaSignalPublisher | None = None
 
     def __init__(self) -> None:
         self.errors: list[str] = []

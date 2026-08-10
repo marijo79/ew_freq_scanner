@@ -1,0 +1,16 @@
+# Copy to terraform.tfvars and fill in before `terraform apply`.
+# terraform.tfvars is gitignored — never commit real values.
+
+aws_region   = "eu-central-1"
+project_name = "freqscan"
+
+# REQUIRED override: the placeholder default (203.0.113.0/24, RFC 5737
+# TEST-NET-3) matches no real host, so the cluster stays unreachable until
+# you set this to the producer machine's actual public IP/CIDR.
+allowed_cidr_blocks = ["203.0.113.0/24"]
+
+# vpc_cidr              = "10.20.0.0/16"
+# kafka_version          = "3.6.0"
+# broker_instance_type   = "kafka.t3.small"
+# broker_count           = 2
+# broker_ebs_volume_size = 100

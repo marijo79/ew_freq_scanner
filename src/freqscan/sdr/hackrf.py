@@ -5,6 +5,8 @@ from collections import deque
 from freqscan.config import HackRFSettings, RangeConfig
 from freqscan.parsing import parse_sweep_line, trim_edges
 from freqscan.sdr.base import Channel, SDRBackend, SweepState
+from freqscan.streaming.detector import NoiseFloorDetector, hop_median
+from freqscan.streaming.kafka_publisher import KafkaSignalPublisher
 
 
 def _make_channel(r: RangeConfig, waterfall_rows: int) -> Channel:
@@ -19,11 +21,21 @@ def _make_channel(r: RangeConfig, waterfall_rows: int) -> Channel:
 class HackRFBackend(SDRBackend):
     """A single hackrf_sweep subprocess covering all configured ranges, demuxed by frequency."""
 
-    def __init__(self, settings: HackRFSettings, waterfall_rows: int):
+    def __init__(
+        self,
+        settings: HackRFSettings,
+        waterfall_rows: int,
+        publisher: KafkaSignalPublisher | None = None,
+        detectors: list[NoiseFloorDetector] | None = None,
+        partitions: list[int] | None = None,
+    ):
         super().__init__()
         self.settings = settings
         self.channels = [_make_channel(r, waterfall_rows) for r in settings.ranges]
         self._proc: subprocess.Popen | None = None
+        self._publisher = publisher
+        self._detectors = detectors
+        self._partitions = partitions
 
     def _range_index_for(self, hz_low: float) -> int | None:
         mhz = hz_low / 1e6
@@ -39,10 +51,9 @@ class HackRFBackend(SDRBackend):
         freq_args = []
         for r in self.settings.ranges:
             freq_args += ["-f", f"{int(r.freq_start)}:{int(r.freq_stop)}"]
-        bin_width = min(r.bin_width for r in self.settings.ranges)
         cmd = [
             "hackrf_sweep", *freq_args,
-            "-w", str(bin_width),
+            "-w", str(self.settings.bin_width),
             "-l", str(self.settings.lna_gain),
             "-g", str(self.settings.vga_gain),
             "-a", "1" if self.settings.amp_enable else "0",
@@ -59,12 +70,33 @@ class HackRFBackend(SDRBackend):
             idx = self._range_index_for(line.hz_low)
             if idx is None:
                 continue
-            edge_trim = self.settings.ranges[idx].edge_trim
-            freqs, powers = trim_edges(line.hz_low, line.hz_step, line.powers, edge_trim)
+            r = self.settings.ranges[idx]
+            freqs, powers = trim_edges(line.hz_low, line.hz_step, line.powers, r.edge_trim)
+            # hackrf_sweep has a hard minimum sweep width tied to its sample rate (~20MHz) —
+            # a configured range narrower than that gets silently widened by the tool itself
+            # (e.g. requesting 106:107 actually sweeps 106-126), so a hop's bins can extend
+            # past this range's own freq_stop even though its hz_low matched. Clip to the
+            # range actually configured rather than trusting the whole hop belongs to it.
+            range_start_hz, range_stop_hz = r.freq_start * 1e6, r.freq_stop * 1e6
+            in_range = [(f, p) for f, p in zip(freqs, powers) if range_start_hz <= f < range_stop_hz]
+            if not in_range:
+                continue
+            freqs, powers = zip(*in_range)
             channel = self.channels[idx]
             with channel.state.lock:
                 for f, p in zip(freqs, powers):
                     channel.state.sweep[f] = p
+
+            if self._detectors is not None:
+                detector = self._detectors[idx]
+                partition = self._partitions[idx] if self._partitions is not None else -1
+                spatial_baseline = hop_median(powers)
+                flagged = [
+                    (f, p)
+                    for f, p in zip(freqs, powers)
+                    if detector.flag(f, p, spatial_baseline=spatial_baseline)
+                ]
+                self._publisher.publish(channel.label, flagged, partition=partition)
 
         self._proc.wait()
         if self._proc.returncode > 0:
@@ -76,3 +108,5 @@ class HackRFBackend(SDRBackend):
     def stop(self) -> None:
         if self._proc is not None:
             self._proc.terminate()
+        if self._publisher is not None:
+            self._publisher.flush()
