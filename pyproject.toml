@@ -8,8 +8,8 @@ version = "0.1.0"
 description = "EW Frequency Scanner — live spectrum/waterfall plotting for RTL-SDR and HackRF"
 requires-python = ">=3.11"
 dependencies = [
-    "numpy==2.4.6",
-    "matplotlib==3.10.9",
+    "numpy>=1.26,<3",
+    "matplotlib>=3.8,<4",
     "pydantic-settings>=2.6",
     "confluent-kafka>=2.3,<3",
     "aws-msk-iam-sasl-signer-python>=1.0,<2",

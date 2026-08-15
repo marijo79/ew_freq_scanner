@@ -14,6 +14,22 @@ cp .env.example .env
 # optionally also fill in KAFKA__* to stream flagged signals to an MSK cluster
 ```
 
+### Installing on Raspberry Pi / other ARM boards
+
+`numpy` and `matplotlib` publish prebuilt wheels for 64-bit ARM Linux (`aarch64`) but **not** for 32-bit ARM (`armv7l`) — check with `uname -m` before starting. If it says `armv7l`, plain `pip install` will fail trying to find/build packages that don't support 32-bit ARM at all; the practical fix is a 64-bit OS reinstall (Raspberry Pi OS 64-bit, any Pi 3/4/5), not fighting the build.
+
+If you're on `aarch64`, `numpy`/`matplotlib` install fine as wheels, but **`confluent-kafka` has no ARM wheels at all** (any architecture) — pip will compile it from source, which needs its C dependency (`librdkafka`) present first:
+
+```bash
+sudo apt install librdkafka-dev build-essential python3-dev
+pip install --upgrade pip   # old pip on Raspberry Pi OS may not recognize current wheel tags
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"     # confluent-kafka's build step can take several minutes on a Pi
+```
+
+If the Pi has 1GB RAM or less, the compile step can OOM — add swap first (`sudo dphys-swapfile swapoff && sudo nano /etc/dphys-swapfile` to raise `CONF_SWAPSIZE`, then `sudo dphys-swapfile setup && sudo dphys-swapfile swapon`) if `pip install` gets killed partway through.
+
 ## Configuration reference
 
 All configuration lives in `.env` (see `.env.example`), read via `pydantic-settings`. There is no explicit backend selector — a backend runs if its section (`RTL__*` and/or `HACKRF__*`) is present; at least one must be. `KAFKA__*` is independent of that and fully optional (see [Kafka streaming](#kafka-streaming-kafka__-optional) below).
