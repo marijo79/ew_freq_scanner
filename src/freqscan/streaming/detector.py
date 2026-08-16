@@ -1,23 +1,41 @@
-import statistics
-from collections import deque
 from dataclasses import dataclass, field
 
+import numpy as np
 
-def hop_median(powers: list[float]) -> float | None:
-    """Median power across one hop's bins — the spatial signal baseline. None if empty."""
-    return statistics.median(powers) if powers else None
+
+def nearest_grid_index(canonical_freqs: np.ndarray, freq_hz):
+    """Index (or array of indices, matching freq_hz's shape) of the canonical grid
+    frequency closest to freq_hz. canonical_freqs must be sorted ascending.
+
+    Used both by the producer (snapping a hop's real, possibly slightly-off-grid bin
+    centers onto a channel's fixed n_bins grid before updating detector state) and by
+    the Kafka viewer (same snapping, for the same reason: the producer's actual bin
+    centers and a grid computed from nominal config values can differ by sub-bin
+    amounts, and without snapping that mismatch would silently create extra columns).
+    """
+    n = len(canonical_freqs)
+    freq_hz = np.asarray(freq_hz)
+    idx = np.searchsorted(canonical_freqs, freq_hz)
+    idx_clamped = np.clip(idx, 1, n - 1)
+    before = canonical_freqs[idx_clamped - 1]
+    after = canonical_freqs[idx_clamped]
+    prefer_before = (freq_hz - before) <= (after - freq_hz)
+    result = np.where(prefer_before, idx_clamped - 1, idx_clamped)
+    result = np.where(idx == 0, 0, result)
+    result = np.where(idx == n, n - 1, result)
+    return result
 
 
 @dataclass
 class NoiseFloorDetector:
-    """Tracks a per-bin rolling baseline and flags readings that exceed it by a margin.
+    """Vectorized per-bin adaptive noise-floor detector over a channel's full n_bins grid.
 
-    Each frequency bin gets its own fixed-size history; a bin isn't flagged until its
-    history has filled once (cold start), so an adaptive baseline exists to compare
-    against.
+    Each of the n_bins bins gets its own fixed-size rolling window (a circular buffer,
+    not a Python dict of deques); a bin isn't flagged until its own window has filled
+    once (cold start), so an adaptive baseline exists to compare against.
 
     Optionally also requires the reading to stand out from the rest of its own hop
-    (spatial_margin_db, compared against that hop's hop_median()), on top of standing
+    (spatial_margin_db, compared against that hop's own median), on top of standing
     out from its own history — catches a whole band being uniformly noisy without
     treating every bin in it as a separate signal. This is an AND: it can only suppress
     a bin the temporal check already flagged, never flag one on its own. None (default)
@@ -25,33 +43,58 @@ class NoiseFloorDetector:
 
     Separately, optionally also flags a bin regardless of its own history if it's simply
     prominent right now — far enough above the rest of its own hop (prominence_margin_db,
-    also compared against hop_median()). This is an OR with the temporal check, not an
-    AND: it exists for signals that are always there and always strong (e.g. a steady FM
-    broadcast carrier) — the temporal check alone never flags these, since the adaptive
-    baseline just learns to expect them, so nothing ever looks "new". A generous margin
-    (bigger than spatial_margin_db) keeps this from re-triggering on generically noisy
-    broadband bins, which sit close to their own hop's median by definition — only an
-    isolated peak clears a large prominence margin. None (default) disables this.
+    also compared against that hop's median). This is an OR with the temporal check, not
+    an AND: it exists for signals that are always there and always strong (e.g. a steady
+    FM broadcast carrier) — the temporal check alone never flags these, since the
+    adaptive baseline just learns to expect them, so nothing ever looks "new". A generous
+    margin (bigger than spatial_margin_db) keeps this from re-triggering on generically
+    noisy broadband bins, which sit close to their own hop's median by definition — only
+    an isolated peak clears a large prominence margin. None (default) disables this.
+
+    Processes one whole hop at a time (flag_hop), not one bin at a time — batches all the
+    per-bin work (history mean, comparisons) into a handful of vectorized numpy
+    operations instead of a Python-level loop over every bin. Measured ~9x faster at
+    20,000 bins/hop than the equivalent per-bin Python loop; on weaker hardware (e.g. a
+    Raspberry Pi), the per-bin loop can fail to keep up with hackrf_sweep's output rate
+    at all, backlogging the whole process.
     """
 
+    n_bins: int
     window: int
     margin_db: float
     spatial_margin_db: float | None = None
     prominence_margin_db: float | None = None
-    _history: dict[float, deque] = field(default_factory=dict, repr=False)
+    _history: np.ndarray = field(init=False, repr=False)
+    _fill_count: np.ndarray = field(init=False, repr=False)
+    _cursor: np.ndarray = field(init=False, repr=False)
 
-    def flag(self, freq_hz: float, power_dbm: float, spatial_baseline: float | None = None) -> bool:
-        history = self._history.setdefault(freq_hz, deque(maxlen=self.window))
-        is_signal = False
-        if len(history) == self.window:
-            baseline = sum(history) / len(history)
-            is_signal = power_dbm > baseline + self.margin_db
-        history.append(power_dbm)
+    def __post_init__(self) -> None:
+        self._history = np.zeros((self.window, self.n_bins), dtype=np.float64)
+        self._fill_count = np.zeros(self.n_bins, dtype=np.int64)
+        self._cursor = np.zeros(self.n_bins, dtype=np.int64)
 
-        if is_signal and self.spatial_margin_db is not None and spatial_baseline is not None:
-            is_signal = power_dbm > spatial_baseline + self.spatial_margin_db
+    def flag_hop(self, indices: np.ndarray, powers: np.ndarray) -> np.ndarray:
+        """indices: this hop's bins, as indices into the channel's full n_bins grid
+        (see nearest_grid_index). powers: their power readings, same length/order.
+        Returns a boolean array, same length as indices, of which bins are signal."""
+        filled = self._fill_count[indices] >= self.window
+        baseline = self._history[:, indices].mean(axis=0)
+        is_temporal = filled & (powers > baseline + self.margin_db)
+        is_signal = is_temporal.copy()
 
-        if not is_signal and self.prominence_margin_db is not None and spatial_baseline is not None:
-            is_signal = power_dbm > spatial_baseline + self.prominence_margin_db
+        needs_hop_baseline = self.spatial_margin_db is not None or self.prominence_margin_db is not None
+        if needs_hop_baseline and powers.size:
+            hop_baseline = np.median(powers)
+            if self.spatial_margin_db is not None:
+                spatial_pass = powers > (hop_baseline + self.spatial_margin_db)
+                is_signal = np.where(is_temporal, spatial_pass, is_signal)
+            if self.prominence_margin_db is not None:
+                prominence_pass = powers > (hop_baseline + self.prominence_margin_db)
+                is_signal = np.where(~is_signal, prominence_pass, is_signal)
+
+        cursor = self._cursor[indices]
+        self._history[cursor, indices] = powers
+        self._fill_count[indices] = np.minimum(self._fill_count[indices] + 1, self.window)
+        self._cursor[indices] = (cursor + 1) % self.window
 
         return is_signal

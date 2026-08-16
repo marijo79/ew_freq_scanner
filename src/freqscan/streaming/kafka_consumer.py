@@ -8,20 +8,10 @@ from confluent_kafka import OFFSET_BEGINNING, OFFSET_END, Consumer, KafkaError, 
 
 from freqscan.config import KafkaViewerSettings
 from freqscan.sdr.base import Channel, SDRBackend, SweepState
+from freqscan.streaming.detector import nearest_grid_index
 from freqscan.streaming.kafka_publisher import oauth_cb
 
 METADATA_TIMEOUT = 10.0  # seconds to wait for every channel's metadata before giving up
-
-
-def nearest_grid_index(canonical_freqs: np.ndarray, freq_hz: float) -> int:
-    """Index of the canonical grid frequency closest to freq_hz. canonical_freqs must be sorted."""
-    idx = np.searchsorted(canonical_freqs, freq_hz)
-    if idx == 0:
-        return 0
-    if idx == len(canonical_freqs):
-        return len(canonical_freqs) - 1
-    before, after = canonical_freqs[idx - 1], canonical_freqs[idx]
-    return idx - 1 if (freq_hz - before) <= (after - freq_hz) else idx
 
 
 def apply_message(channel: Channel, payload: dict, canonical_freqs: np.ndarray) -> None:

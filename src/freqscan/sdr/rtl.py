@@ -2,10 +2,12 @@ import subprocess
 import threading
 from collections import deque
 
+import numpy as np
+
 from freqscan.config import DeviceConfig, RTLSettings
 from freqscan.parsing import parse_sweep_line
 from freqscan.sdr.base import Channel, SDRBackend, SweepState
-from freqscan.streaming.detector import NoiseFloorDetector, hop_median
+from freqscan.streaming.detector import NoiseFloorDetector, nearest_grid_index
 from freqscan.streaming.kafka_publisher import KafkaSignalPublisher
 
 _SUFFIX_TO_HZ = {"k": 1e3, "K": 1e3, "m": 1e6, "M": 1e6, "g": 1e9, "G": 1e9}
@@ -41,6 +43,7 @@ class RTLBackend(SDRBackend):
         publisher: KafkaSignalPublisher | None = None,
         detectors: list[NoiseFloorDetector] | None = None,
         partitions: list[int] | None = None,
+        canonical_freqs: list[np.ndarray] | None = None,
     ):
         super().__init__()
         self.settings = settings
@@ -50,17 +53,26 @@ class RTLBackend(SDRBackend):
         self._publisher = publisher
         self._detectors = detectors
         self._partitions = partitions
+        self._canonical_freqs = canonical_freqs
 
     def start(self) -> None:
         detectors = self._detectors or [None] * len(self.channels)
         partitions = self._partitions or [-1] * len(self.channels)
-        for dev, channel, detector, partition in zip(self.settings.devices, self.channels, detectors, partitions):
+        canonical_freqs = self._canonical_freqs or [None] * len(self.channels)
+        for dev, channel, detector, partition, freqs in zip(
+            self.settings.devices, self.channels, detectors, partitions, canonical_freqs
+        ):
             threading.Thread(
-                target=self._run_device, args=(dev, channel, detector, partition), daemon=True
+                target=self._run_device, args=(dev, channel, detector, partition, freqs), daemon=True
             ).start()
 
     def _run_device(
-        self, dev: DeviceConfig, channel: Channel, detector: NoiseFloorDetector | None, partition: int
+        self,
+        dev: DeviceConfig,
+        channel: Channel,
+        detector: NoiseFloorDetector | None,
+        partition: int,
+        canonical_freqs: np.ndarray | None,
     ) -> None:
         cmd = [
             "rtl_power",
@@ -93,12 +105,14 @@ class RTLBackend(SDRBackend):
                     channel.state.sweep[f] = p
 
             if detector is not None:
-                spatial_baseline = hop_median(line.powers)
-                flagged = [
-                    (f, p)
-                    for f, p in zip(freqs, line.powers)
-                    if detector.flag(f, p, spatial_baseline=spatial_baseline)
-                ]
+                freqs_arr = np.asarray(freqs)
+                powers_arr = np.asarray(line.powers)
+                # Snap this hop's real bin centers onto the channel's fixed grid before
+                # updating detector state — rtl_power's actual hz_step and the grid
+                # computed from nominal config can differ by sub-bin amounts.
+                indices = nearest_grid_index(canonical_freqs, freqs_arr)
+                flagged_mask = detector.flag_hop(indices, powers_arr)
+                flagged = list(zip(freqs_arr[flagged_mask].tolist(), powers_arr[flagged_mask].tolist()))
                 self._publisher.publish(channel.label, flagged, partition=partition)
 
         proc.wait()

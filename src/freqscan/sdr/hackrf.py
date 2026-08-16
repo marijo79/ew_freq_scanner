@@ -2,10 +2,12 @@ import subprocess
 import threading
 from collections import deque
 
+import numpy as np
+
 from freqscan.config import HackRFSettings, RangeConfig
 from freqscan.parsing import parse_sweep_line, trim_edges
 from freqscan.sdr.base import Channel, SDRBackend, SweepState
-from freqscan.streaming.detector import NoiseFloorDetector, hop_median
+from freqscan.streaming.detector import NoiseFloorDetector, nearest_grid_index
 from freqscan.streaming.kafka_publisher import KafkaSignalPublisher
 
 
@@ -28,6 +30,7 @@ class HackRFBackend(SDRBackend):
         publisher: KafkaSignalPublisher | None = None,
         detectors: list[NoiseFloorDetector] | None = None,
         partitions: list[int] | None = None,
+        canonical_freqs: list[np.ndarray] | None = None,
     ):
         super().__init__()
         self.settings = settings
@@ -36,6 +39,7 @@ class HackRFBackend(SDRBackend):
         self._publisher = publisher
         self._detectors = detectors
         self._partitions = partitions
+        self._canonical_freqs = canonical_freqs
 
     def _range_index_for(self, hz_low: float) -> int | None:
         mhz = hz_low / 1e6
@@ -90,12 +94,11 @@ class HackRFBackend(SDRBackend):
             if self._detectors is not None:
                 detector = self._detectors[idx]
                 partition = self._partitions[idx] if self._partitions is not None else -1
-                spatial_baseline = hop_median(powers)
-                flagged = [
-                    (f, p)
-                    for f, p in zip(freqs, powers)
-                    if detector.flag(f, p, spatial_baseline=spatial_baseline)
-                ]
+                freqs_arr = np.asarray(freqs)
+                powers_arr = np.asarray(powers)
+                indices = nearest_grid_index(self._canonical_freqs[idx], freqs_arr)
+                flagged_mask = detector.flag_hop(indices, powers_arr)
+                flagged = list(zip(freqs_arr[flagged_mask].tolist(), powers_arr[flagged_mask].tolist()))
                 self._publisher.publish(channel.label, flagged, partition=partition)
 
         self._proc.wait()
