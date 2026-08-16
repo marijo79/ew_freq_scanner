@@ -8,6 +8,17 @@
 #   KAFKA_HOME=/path/to/kafka scripts/start_local_kafka.sh   # override install location
 #
 # Then smoke-test with: python scripts/kafka_smoke_test.py --bootstrap-servers localhost:9092 --security-protocol PLAINTEXT
+#
+# For a producer on another machine (e.g. a Raspberry Pi) to reach this broker, two things
+# in config/server.properties must both be set, not just the firewall/port:
+#   - listeners=PLAINTEXT://:9092              (binds all interfaces — usually already right)
+#   - advertised.listeners=PLAINTEXT://<LAN IP>:9092   (NOT "localhost" — the broker hands
+#     this address back to clients after the initial bootstrap for actual produce/fetch
+#     requests; left as "localhost" it works fine from this machine but silently breaks any
+#     remote client right after the first connection, which is easy to misdiagnose as a
+#     firewall/network problem instead of a config one)
+# Changing advertised.listeners requires restarting the broker (this script/kafka-server-stop.sh) —
+# it isn't hot-reloaded.
 
 set -euo pipefail
 
