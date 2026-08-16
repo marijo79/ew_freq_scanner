@@ -57,6 +57,14 @@ class KafkaConsumerBackend(SDRBackend):
     which visibly showed up as the whole waterfall reflowing/shifting for a while after
     startup — every column's geometric position in plotting.py's imshow depends on the
     *total* column count, so adding columns anywhere shifts everything, not just what's new.
+
+    The metadata topic's partition count only ever grows across the topic's lifetime
+    (Kafka can't shrink it), so a run with fewer channels than some earlier run leaves
+    the unused higher partitions holding that earlier run's last message rather than
+    nothing — every metadata message carries a `run_epoch` (the producer's own startup
+    time, identical across every channel published in one run) so this run's fresh
+    messages can be told apart from an older run's stale leftovers on partitions this
+    run didn't touch; see __init__.
     """
 
     def __init__(self, settings: KafkaViewerSettings, waterfall_rows: int):
@@ -75,17 +83,35 @@ class KafkaConsumerBackend(SDRBackend):
             return
 
         print("freqscan-viewer: waiting for channel metadata...", flush=True)
-        metadata = self._read_metadata(n_partitions)
-        missing = [i for i in range(n_partitions) if i not in metadata]
-        if missing:
+        all_metadata = self._read_metadata(n_partitions)
+        if not all_metadata:
             self.report_error(
-                f"no metadata received for partition(s) {missing} of "
-                f"'{settings.metadata_topic}' within {METADATA_TIMEOUT}s — "
-                "is the producer running with --kafka_publisher?"
+                f"no metadata received from '{settings.metadata_topic}' within "
+                f"{METADATA_TIMEOUT}s — is the producer running with --kafka_publisher?"
             )
             return
 
-        for i in range(n_partitions):
+        # The metadata topic is append-only and never shrinks its partition count even
+        # when a later run uses fewer channels — a partition the current run doesn't
+        # publish to still holds its last message from whatever earlier run last touched
+        # it. run_epoch is the same value on every message a single run publishes, so the
+        # highest one seen is this run's, and only partitions carrying it are live now.
+        # .get(..., 0.0) tolerates messages published before run_epoch existed at all —
+        # those are exactly the stale leftovers this filtering is meant to drop anyway.
+        current_epoch = max(m.get("run_epoch", 0.0) for m in all_metadata.values())
+        metadata = {i: m for i, m in all_metadata.items() if m.get("run_epoch", 0.0) == current_epoch}
+        n_channels = len(metadata)
+        missing = [i for i in range(n_channels) if i not in metadata]
+        if missing:
+            self.report_error(
+                f"channel metadata for the current run is incomplete — missing partition(s) "
+                f"{missing} of {n_channels} expected (build_backend() numbers channels "
+                f"0..N-1 contiguously, so a gap means a partition's metadata didn't arrive "
+                f"within {METADATA_TIMEOUT}s)"
+            )
+            return
+
+        for i in range(n_channels):
             m = metadata[i]
             freqs = np.linspace(m["freq_start_hz"], m["freq_stop_hz"], m["n_bins"], endpoint=False)
             channel = Channel(

@@ -88,6 +88,7 @@ def test_publish_metadata_sends_to_metadata_topic_on_given_partition():
         freq_stop_hz=950e6,
         bin_width_hz=20_000,
         n_bins=5000,
+        run_epoch=1_700_000_000.0,
     )
 
     assert len(producer.produced) == 1
@@ -101,6 +102,7 @@ def test_publish_metadata_sends_to_metadata_topic_on_given_partition():
         "freq_stop_hz": 950e6,
         "bin_width_hz": 20_000,
         "n_bins": 5000,
+        "run_epoch": 1_700_000_000.0,
     }
     # metadata isn't part of offset tracking (that's per-hop signal delivery only)
     assert publisher.offsets() == {}
@@ -134,6 +136,7 @@ def test_build_metadata_payload_shape():
         freq_stop_hz=120e6,
         bin_width_hz=10_000,
         n_bins=4000,
+        run_epoch=1_700_000_000.0,
     )
     assert payload == {
         "channel": "RTL: Dev0 80-120 MHz",
@@ -141,4 +144,5 @@ def test_build_metadata_payload_shape():
         "freq_stop_hz": 120e6,
         "bin_width_hz": 10_000,
         "n_bins": 4000,
+        "run_epoch": 1_700_000_000.0,
     }

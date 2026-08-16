@@ -1,4 +1,5 @@
 import sys
+import time
 
 import numpy as np
 
@@ -71,10 +72,16 @@ def _build_hackrf_detectors(
 
 
 def _publish_metadata(
-    publisher: KafkaSignalPublisher, grids: list[ChannelGrid], channels: list[Channel], partitions: list[int]
+    publisher: KafkaSignalPublisher,
+    grids: list[ChannelGrid],
+    channels: list[Channel],
+    partitions: list[int],
+    run_epoch: float,
 ) -> None:
     for (freq_start_hz, freq_stop_hz, bin_width_hz, n_bins), channel, partition in zip(grids, channels, partitions):
-        publisher.publish_metadata(channel.label, partition, freq_start_hz, freq_stop_hz, bin_width_hz, n_bins)
+        publisher.publish_metadata(
+            channel.label, partition, freq_start_hz, freq_stop_hz, bin_width_hz, n_bins, run_epoch
+        )
 
 
 def build_backend(settings: Settings) -> SDRBackend:
@@ -83,6 +90,11 @@ def build_backend(settings: Settings) -> SDRBackend:
     publisher = (
         KafkaSignalPublisher(build_producer(kafka), kafka.topic, kafka.metadata_topic) if streaming else None
     )
+
+    # Same value on every metadata message published this run, regardless of channel —
+    # lets a viewer tell this run's fresh metadata apart from an older run's stale
+    # leftovers on a partition the current run doesn't touch (see kafka_consumer.py).
+    run_epoch = time.time()
 
     backends: list[SDRBackend] = []
     next_partition = 0
@@ -97,7 +109,7 @@ def build_backend(settings: Settings) -> SDRBackend:
             settings.rtl, settings.waterfall_rows, publisher, detectors, partitions, canonical_freqs
         )
         if streaming:
-            _publish_metadata(publisher, grids, rtl_backend.channels, partitions)
+            _publish_metadata(publisher, grids, rtl_backend.channels, partitions, run_epoch)
         backends.append(rtl_backend)
     if settings.hackrf is not None:
         grids = _hackrf_channel_grids(settings.hackrf)
@@ -110,7 +122,7 @@ def build_backend(settings: Settings) -> SDRBackend:
             settings.hackrf, settings.waterfall_rows, publisher, detectors, partitions, canonical_freqs
         )
         if streaming:
-            _publish_metadata(publisher, grids, hackrf_backend.channels, partitions)
+            _publish_metadata(publisher, grids, hackrf_backend.channels, partitions, run_epoch)
         backends.append(hackrf_backend)
     backend = backends[0] if len(backends) == 1 else CompositeBackend(backends)
     backend.publisher = publisher

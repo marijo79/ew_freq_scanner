@@ -197,6 +197,10 @@ def test_build_backend_publishes_rtl_metadata_once_per_channel(monkeypatch):
     build_backend(settings)
 
     messages = _metadata_messages(producer, kafka.metadata_topic)
+    # run_epoch is build_backend()'s own startup time — non-deterministic, but must be the
+    # same value for every channel published in this one run (see kafka_consumer.py).
+    run_epochs = [m.pop("run_epoch") for m in messages]
+    assert len(set(run_epochs)) == 1
     assert messages == [
         {
             "channel": "RTL: Dev0 80-120 MHz",
@@ -234,6 +238,8 @@ def test_build_backend_publishes_hackrf_metadata_using_shared_bin_width(monkeypa
     build_backend(settings)
 
     messages = _metadata_messages(producer, kafka.metadata_topic)
+    run_epochs = [m.pop("run_epoch") for m in messages]
+    assert len(set(run_epochs)) == 1
     # bin_width_hz is HackRFSettings.bin_width for every range — hackrf_sweep only takes
     # one -w value for its entire process, shared across all configured ranges.
     assert messages == [

@@ -37,16 +37,29 @@ def build_payload(channel_label: str, bins: list[tuple[float, float]], timestamp
 
 
 def build_metadata_payload(
-    channel_label: str, freq_start_hz: float, freq_stop_hz: float, bin_width_hz: float, n_bins: int
+    channel_label: str,
+    freq_start_hz: float,
+    freq_stop_hz: float,
+    bin_width_hz: float,
+    n_bins: int,
+    run_epoch: float,
 ) -> dict:
     """Describes a channel's true full grid — n_bins is the total bin count for the
-    configured range, independent of how many (if any) are ever actually flagged."""
+    configured range, independent of how many (if any) are ever actually flagged.
+
+    run_epoch is the same value (build_backend()'s own startup time) for every metadata
+    message published in one run, regardless of channel — it lets a consumer tell this
+    run's fresh metadata apart from an older run's stale leftovers still sitting on a
+    partition the current run didn't touch (the metadata topic is append-only and never
+    provisioned down, so an over-provisioned/previously-larger topic's unused partitions
+    keep their last real message forever)."""
     return {
         "channel": channel_label,
         "freq_start_hz": freq_start_hz,
         "freq_stop_hz": freq_stop_hz,
         "bin_width_hz": bin_width_hz,
         "n_bins": n_bins,
+        "run_epoch": run_epoch,
     }
 
 
@@ -96,8 +109,9 @@ class KafkaSignalPublisher:
         freq_stop_hz: float,
         bin_width_hz: float,
         n_bins: int,
+        run_epoch: float,
     ) -> None:
-        payload = build_metadata_payload(channel_label, freq_start_hz, freq_stop_hz, bin_width_hz, n_bins)
+        payload = build_metadata_payload(channel_label, freq_start_hz, freq_stop_hz, bin_width_hz, n_bins, run_epoch)
         self._producer.produce(
             self._metadata_topic,
             key=channel_label.encode(),
