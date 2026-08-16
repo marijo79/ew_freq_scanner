@@ -147,6 +147,29 @@ How it works:
 - **Auth is SASL/IAM**, via `aws-msk-iam-sasl-signer-python` — this machine's AWS credentials (same ones set up for Terraform, see [terraform/SETUP.md](terraform/SETUP.md)) are used to sign broker connections, not a separate Kafka username/password.
 - Provisioning the MSK cluster itself is a separate Terraform step — see [terraform/README.md](terraform/README.md).
 
+### Running against a local/dev broker instead of MSK
+
+For local testing without a real MSK cluster, run a native Kafka broker with `scripts/start_local_kafka.sh` (KRaft standalone, PLAINTEXT) and point `.env` at it — `KAFKA__BOOTSTRAP_SERVERS=<host>:9092`, plus `KAFKA__SECURITY_PROTOCOL=PLAINTEXT` and `KAFKA__SASL_MECHANISM=` (empty) to override `KafkaSettings`' real-MSK defaults (`SASL_SSL`/`OAUTHBEARER`), which otherwise fail against a plain local broker with a confusing `SASL_AUTHENTICATION_FAILED` error. Every machine that connects (this one, a remote producer like a Raspberry Pi, a remote viewer) needs its **own** `.env` with these overrides — copying one machine's `.env` to another isn't automatic.
+
+**If any producer/viewer runs on a *different* machine than the broker**, `config/server.properties`'s `advertised.listeners` must name a real, reachable LAN IP — not `localhost`. The broker hands this address back to clients after their first bootstrap connection, for all actual produce/fetch requests; left as `localhost`, remote clients connect fine initially and then silently fail/time out on the very next request — this reads exactly like a firewall or network problem, but isn't one.
+
+This address is static, not auto-detected — Kafka has no option to advertise "whatever my current IP happens to be." That means **it goes stale every time the broker machine's LAN IP changes** (new network, new router, a DHCP lease renewal), and needs to be fixed the same way each time:
+
+```bash
+hostname -I   # current LAN IP of the machine running the broker
+
+# in config/server.properties:
+#   advertised.listeners=PLAINTEXT://<that IP>:9092,CONTROLLER://localhost:9093
+
+~/kafka/kafka_2.13-4.3.1/bin/kafka-server-stop.sh   # advertised.listeners isn't hot-reloaded
+scripts/start_local_kafka.sh
+
+# then update KAFKA__BOOTSTRAP_SERVERS in every OTHER machine's own .env (remote
+# producer(s), remote viewer(s)) to the same new IP, and restart those processes too
+```
+
+If a remote producer/viewer suddenly "can't send" / "can't connect" again with no other change, check this first before suspecting a code or Kafka regression — it's almost always a stale `advertised.listeners` after the broker machine's IP changed.
+
 ## Running
 
 `freqscan` requires at least one of two flags — it refuses to start with neither, since running with neither would mean it does nothing observable at all:
