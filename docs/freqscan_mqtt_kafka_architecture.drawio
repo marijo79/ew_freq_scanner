@@ -1,0 +1,229 @@
+<mxfile host="app.diagrams.net" modified="2026-08-24T00:00:00.000Z" agent="claude-code" version="24.0.0" type="device">
+  <diagram id="stage1-ssh" name="Stage 1 - SSH (current)">
+    <mxGraphModel dx="1200" dy="700" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="700" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- Raspberry Pi nodes (card shape = edge device/board) -->
+        <mxCell id="pi1" value="Raspberry Pi #1&#10;(RTL-SDR / HackRF)&#10;freqscan" style="shape=card;whiteSpace=wrap;html=1;size=16;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="180" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="pi2" value="Raspberry Pi #2&#10;(RTL-SDR / HackRF)&#10;freqscan" style="shape=card;whiteSpace=wrap;html=1;size=16;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="180" width="180" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="pi3" value="Raspberry Pi #3&#10;(RTL-SDR / HackRF)&#10;freqscan" style="shape=card;whiteSpace=wrap;html=1;size=16;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="320" width="180" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- Kafka broker (data plane, local for now) — hand-built horizontal barrel/pipe (group = edge anchor, invisible) -->
+        <mxCell id="kafka" value="" style="group;" vertex="1" connectable="1" parent="1">
+          <mxGeometry x="390" y="55" width="250" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="kafka_capL" value="" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="kafka">
+          <mxGeometry x="0" y="0" width="40" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="kafka_capR" value="" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="kafka">
+          <mxGeometry x="210" y="0" width="40" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="kafka_body" value="Kafka Broker&#10;(local, this PC)&#10;Data Plane&#10;topics: freqscan.signals, freqscan.signals.metadata" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=none;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="kafka">
+          <mxGeometry x="20" y="0" width="210" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="kafka_lineTop" value="" style="endArrow=none;html=1;strokeColor=#6c8ebf;" edge="1" parent="kafka">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="20" y="0" as="sourcePoint" />
+            <mxPoint x="230" y="0" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="kafka_lineBottom" value="" style="endArrow=none;html=1;strokeColor=#6c8ebf;" edge="1" parent="kafka">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="20" y="100" as="sourcePoint" />
+            <mxPoint x="230" y="100" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- SSH control plane via NAT-bypassing mesh VPN (replaces MQTT for this stage) -->
+        <mxCell id="sshmesh" value="Tailscale Mesh VPN&#10;(WireGuard, NAT traversal)&#10;ad-hoc ssh access" style="shape=hexagon;perimeter=hexagonPerimeter2;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#d5f0f0;strokeColor=#0e8088;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="390" y="280" width="240" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- Central Dashboard / TOC — monitor showing a small bar-chart, caption below (group = edge anchor) -->
+        <mxCell id="toc" value="" style="group;" vertex="1" connectable="1" parent="1">
+          <mxGeometry x="740" y="120" width="240" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="toc_frame" value="" style="shape=display;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="toc">
+          <mxGeometry x="40" y="0" width="160" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="toc_bar1" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#9673a6;strokeColor=none;" vertex="1" parent="toc">
+          <mxGeometry x="60" y="60" width="18" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="toc_bar2" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#9673a6;strokeColor=none;" vertex="1" parent="toc">
+          <mxGeometry x="85" y="45" width="18" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="toc_bar3" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#9673a6;strokeColor=none;" vertex="1" parent="toc">
+          <mxGeometry x="110" y="55" width="18" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="toc_bar4" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#9673a6;strokeColor=none;" vertex="1" parent="toc">
+          <mxGeometry x="135" y="35" width="18" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="toc_label" value="Central Dashboard (TOC)&#10;kafka_viewer + command console" style="text;html=1;align=center;verticalAlign=top;fontSize=12;fontStyle=1;fontColor=#333333;" vertex="1" parent="toc">
+          <mxGeometry x="0" y="98" width="240" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Data plane edges: Pi -> Kafka -->
+        <mxCell id="e_pi1_kafka" value="signal data" style="endArrow=block;html=1;strokeColor=#6c8ebf;fontColor=#6c8ebf;fontSize=11;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="pi1" target="kafka">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_pi2_kafka" value="signal data" style="endArrow=block;html=1;strokeColor=#6c8ebf;fontColor=#6c8ebf;fontSize=11;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="pi2" target="kafka">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_pi3_kafka" value="signal data" style="endArrow=block;html=1;strokeColor=#6c8ebf;fontColor=#6c8ebf;fontSize=11;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="pi3" target="kafka">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Data plane: Kafka -> TOC -->
+        <mxCell id="e_kafka_toc" value="consume signal feed" style="endArrow=block;html=1;strokeColor=#6c8ebf;fontColor=#6c8ebf;fontSize=11;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="kafka" target="toc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Control plane: TOC -> SSH mesh -->
+        <mxCell id="e_toc_ssh" value="ssh session" style="endArrow=block;html=1;strokeColor=#0e8088;fontColor=#0e8088;fontSize=11;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="toc" target="sshmesh">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Control plane: SSH mesh -> Pi (commands) -->
+        <mxCell id="e_ssh_pi1" value="config / commands (ssh)" style="endArrow=block;html=1;strokeColor=#0e8088;fontColor=#0e8088;fontSize=11;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="sshmesh" target="pi1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_ssh_pi2" value="config / commands (ssh)" style="endArrow=block;html=1;strokeColor=#0e8088;fontColor=#0e8088;fontSize=11;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="sshmesh" target="pi2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_ssh_pi3" value="config / commands (ssh)" style="endArrow=block;html=1;strokeColor=#0e8088;fontColor=#0e8088;fontSize=11;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="sshmesh" target="pi3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Legend -->
+        <mxCell id="legend" value="Blue = data plane (Kafka)&#10;Teal = control plane (SSH via Tailscale mesh)" style="text;html=1;align=left;verticalAlign=top;fontSize=11;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="740" y="320" width="260" height="50" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="freqscan-arch" name="Stage 2 - MQTT + AWS (target)">
+    <mxGraphModel dx="1200" dy="700" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1100" pageHeight="700" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- AWS boundary — encloses Kafka (MSK) and MQTT (IoT Core) as AWS-hosted services -->
+        <mxCell id="aws_boundary" value="AWS Cloud" style="rounded=0;whiteSpace=wrap;html=1;dashed=1;dashPattern=8 4;strokeColor=#FF9900;fillColor=none;verticalAlign=top;align=left;spacingLeft=12;spacingTop=8;fontColor=#FF9900;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="370" y="25" width="290" height="395" as="geometry" />
+        </mxCell>
+
+        <!-- Raspberry Pi nodes (card shape = edge device/board) -->
+        <mxCell id="pi1" value="Raspberry Pi #1&#10;(RTL-SDR / HackRF)&#10;freqscan" style="shape=card;whiteSpace=wrap;html=1;size=16;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="180" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="pi2" value="Raspberry Pi #2&#10;(RTL-SDR / HackRF)&#10;freqscan" style="shape=card;whiteSpace=wrap;html=1;size=16;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="180" width="180" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="pi3" value="Raspberry Pi #3&#10;(RTL-SDR / HackRF)&#10;freqscan" style="shape=card;whiteSpace=wrap;html=1;size=16;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="320" width="180" height="70" as="geometry" />
+        </mxCell>
+
+        <!-- Kafka broker (data plane) — hand-built horizontal barrel/pipe (group = edge anchor, invisible) -->
+        <mxCell id="kafka" value="" style="group;" vertex="1" connectable="1" parent="1">
+          <mxGeometry x="390" y="55" width="250" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="kafka_capL" value="" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="kafka">
+          <mxGeometry x="0" y="0" width="40" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="kafka_capR" value="" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="kafka">
+          <mxGeometry x="210" y="0" width="40" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="kafka_body" value="Kafka Broker (MSK)&#10;Data Plane&#10;topics: freqscan.signals, freqscan.signals.metadata" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=none;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="kafka">
+          <mxGeometry x="20" y="0" width="210" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="kafka_lineTop" value="" style="endArrow=none;html=1;strokeColor=#6c8ebf;" edge="1" parent="kafka">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="20" y="0" as="sourcePoint" />
+            <mxPoint x="230" y="0" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="kafka_lineBottom" value="" style="endArrow=none;html=1;strokeColor=#6c8ebf;" edge="1" parent="kafka">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="20" y="100" as="sourcePoint" />
+            <mxPoint x="230" y="100" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+
+        <!-- MQTT broker (control plane) — cloud = pub/sub message broker -->
+        <mxCell id="mqtt" value="MQTT Broker&#10;Control Plane&#10;topics: freqscan/cmd/&lt;pi-id&gt;, freqscan/status/&lt;pi-id&gt;" style="ellipse;shape=cloud;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="390" y="280" width="240" height="120" as="geometry" />
+        </mxCell>
+
+        <!-- Central Dashboard / TOC — monitor showing a small bar-chart, caption below (group = edge anchor) -->
+        <mxCell id="toc" value="" style="group;" vertex="1" connectable="1" parent="1">
+          <mxGeometry x="740" y="120" width="240" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="toc_frame" value="" style="shape=display;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="toc">
+          <mxGeometry x="40" y="0" width="160" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="toc_bar1" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#9673a6;strokeColor=none;" vertex="1" parent="toc">
+          <mxGeometry x="60" y="60" width="18" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="toc_bar2" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#9673a6;strokeColor=none;" vertex="1" parent="toc">
+          <mxGeometry x="85" y="45" width="18" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="toc_bar3" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#9673a6;strokeColor=none;" vertex="1" parent="toc">
+          <mxGeometry x="110" y="55" width="18" height="25" as="geometry" />
+        </mxCell>
+        <mxCell id="toc_bar4" value="" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#9673a6;strokeColor=none;" vertex="1" parent="toc">
+          <mxGeometry x="135" y="35" width="18" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="toc_label" value="Central Dashboard (TOC)&#10;kafka_viewer + command console" style="text;html=1;align=center;verticalAlign=top;fontSize=12;fontStyle=1;fontColor=#333333;" vertex="1" parent="toc">
+          <mxGeometry x="0" y="98" width="240" height="50" as="geometry" />
+        </mxCell>
+
+        <!-- Data plane edges: Pi -> Kafka -->
+        <mxCell id="e_pi1_kafka" value="signal data" style="endArrow=block;html=1;strokeColor=#6c8ebf;fontColor=#6c8ebf;fontSize=11;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="pi1" target="kafka">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_pi2_kafka" value="signal data" style="endArrow=block;html=1;strokeColor=#6c8ebf;fontColor=#6c8ebf;fontSize=11;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="pi2" target="kafka">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_pi3_kafka" value="signal data" style="endArrow=block;html=1;strokeColor=#6c8ebf;fontColor=#6c8ebf;fontSize=11;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="pi3" target="kafka">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Data plane: Kafka -> TOC -->
+        <mxCell id="e_kafka_toc" value="consume signal feed" style="endArrow=block;html=1;strokeColor=#6c8ebf;fontColor=#6c8ebf;fontSize=11;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="kafka" target="toc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Control plane: TOC -> MQTT -->
+        <mxCell id="e_toc_mqtt" value="publish config / commands" style="endArrow=block;html=1;strokeColor=#d79b00;fontColor=#d79b00;fontSize=11;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="toc" target="mqtt">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Control plane: MQTT -> Pi (commands) -->
+        <mxCell id="e_mqtt_pi1" value="config / commands" style="endArrow=block;html=1;strokeColor=#d79b00;fontColor=#d79b00;fontSize=11;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="mqtt" target="pi1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_mqtt_pi2" value="config / commands" style="endArrow=block;html=1;strokeColor=#d79b00;fontColor=#d79b00;fontSize=11;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="mqtt" target="pi2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e_mqtt_pi3" value="config / commands" style="endArrow=block;html=1;strokeColor=#d79b00;fontColor=#d79b00;fontSize=11;labelBackgroundColor=#ffffff;" edge="1" parent="1" source="mqtt" target="pi3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- Legend -->
+        <mxCell id="legend" value="Blue = data plane (Kafka)&#10;Orange = control plane (MQTT)" style="text;html=1;align=left;verticalAlign=top;fontSize=11;fontColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="740" y="320" width="240" height="50" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
