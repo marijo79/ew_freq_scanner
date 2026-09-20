@@ -9,7 +9,7 @@ from confluent_kafka import OFFSET_BEGINNING, OFFSET_END, Consumer, KafkaError, 
 from freqscan.config import KafkaViewerSettings
 from freqscan.sdr.base import Channel, SDRBackend, SweepState
 from freqscan.streaming.detector import nearest_grid_index
-from freqscan.streaming.kafka_publisher import oauth_cb
+from freqscan.streaming.kafka_publisher import build_client_config
 
 METADATA_TIMEOUT = 10.0  # seconds to wait for every channel's metadata before giving up
 
@@ -30,15 +30,10 @@ def apply_message(channel: Channel, payload: dict, canonical_freqs: np.ndarray) 
 
 def build_consumer(settings: KafkaViewerSettings) -> Consumer:
     config = {
-        "bootstrap.servers": settings.bootstrap_servers,
-        "security.protocol": settings.security_protocol,
+        **build_client_config(settings),
         "group.id": "freqscan-viewer",  # unused for offset commits; assign() bypasses group coordination
         "enable.auto.commit": False,
     }
-    if "SASL" in settings.security_protocol:
-        config["sasl.mechanisms"] = settings.sasl_mechanism
-        if settings.sasl_mechanism == "OAUTHBEARER":
-            config["oauth_cb"] = oauth_cb(settings.region)
     return Consumer(config)
 
 

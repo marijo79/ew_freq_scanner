@@ -1,6 +1,12 @@
 import json
+from dataclasses import dataclass
 
-from freqscan.streaming.kafka_publisher import KafkaSignalPublisher, build_metadata_payload, build_payload
+from freqscan.streaming.kafka_publisher import (
+    KafkaSignalPublisher,
+    build_client_config,
+    build_metadata_payload,
+    build_payload,
+)
 
 
 class _FakeMessage:
@@ -127,6 +133,65 @@ def test_build_payload_shape():
 def test_build_payload_empty_bins():
     payload = build_payload(channel_label="HackRF: 850-950 MHz", bins=[], timestamp=1.0)
     assert payload["bins"] == []
+
+
+@dataclass
+class _FakeKafkaSettings:
+    """Duck-typed stand-in for KafkaSettings/KafkaViewerSettings -- build_client_config()
+    only relies on these attributes being present, not on either concrete class."""
+
+    bootstrap_servers: str = "broker:9092"
+    security_protocol: str = "PLAINTEXT"
+    sasl_mechanism: str = "OAUTHBEARER"
+    region: str = "eu-central-1"
+    sasl_username: str | None = None
+    sasl_password: str | None = None
+    ssl_ca_location: str | None = None
+
+
+def test_build_client_config_plaintext_has_no_sasl_or_ssl_keys():
+    config = build_client_config(_FakeKafkaSettings(security_protocol="PLAINTEXT"))
+    assert config == {"bootstrap.servers": "broker:9092", "security.protocol": "PLAINTEXT"}
+
+
+def test_build_client_config_oauthbearer_sets_oauth_cb_not_username_password():
+    config = build_client_config(
+        _FakeKafkaSettings(
+            security_protocol="SASL_SSL",
+            sasl_mechanism="OAUTHBEARER",
+            sasl_username="ignored",
+            sasl_password="ignored",
+        )
+    )
+    assert config["sasl.mechanisms"] == "OAUTHBEARER"
+    assert callable(config["oauth_cb"])
+    assert "sasl.username" not in config
+    assert "sasl.password" not in config
+
+
+def test_build_client_config_scram_sets_username_and_password():
+    config = build_client_config(
+        _FakeKafkaSettings(
+            security_protocol="SASL_SSL",
+            sasl_mechanism="SCRAM-SHA-512",
+            sasl_username="pi2",
+            sasl_password="s3cret",
+        )
+    )
+    assert config["sasl.mechanisms"] == "SCRAM-SHA-512"
+    assert config["sasl.username"] == "pi2"
+    assert config["sasl.password"] == "s3cret"
+    assert "oauth_cb" not in config
+
+
+def test_build_client_config_includes_ssl_ca_location_when_set():
+    config = build_client_config(_FakeKafkaSettings(ssl_ca_location="/etc/freqscan/ca.pem"))
+    assert config["ssl.ca.location"] == "/etc/freqscan/ca.pem"
+
+
+def test_build_client_config_omits_ssl_ca_location_when_unset():
+    config = build_client_config(_FakeKafkaSettings())
+    assert "ssl.ca.location" not in config
 
 
 def test_build_metadata_payload_shape():

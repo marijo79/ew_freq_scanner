@@ -109,9 +109,23 @@ class KafkaSettings(BaseModel):
     baseline_window: int = 50  # readings per bin kept for the rolling noise-floor baseline
 
     # Real MSK always uses SASL/IAM; override to "PLAINTEXT"/"" for a local, non-MSK broker
-    # (e.g. a native Kafka instance used to smoke-test the producer without touching AWS).
+    # (e.g. a native Kafka instance used to smoke-test the producer without touching AWS),
+    # or to "SASL_SSL"/"SASL_PLAINTEXT" + sasl_mechanism="SCRAM-SHA-512" (see
+    # sasl_username/sasl_password below) for a self-hosted broker secured with real
+    # username/password auth instead of AWS IAM — e.g. the pi-remote-access tunnel VM's
+    # broker, reachable from a field Pi with no AWS credentials of its own.
     security_protocol: str = "SASL_SSL"
     sasl_mechanism: str = "OAUTHBEARER"
+    # sasl_username/sasl_password: used instead of the OAUTHBEARER/IAM token flow when
+    # sasl_mechanism is SCRAM-SHA-256/512 or PLAIN — ignored for OAUTHBEARER (which
+    # always signs its own token via oauth_cb, see kafka_publisher.py).
+    sasl_username: str | None = None
+    sasl_password: str | None = None
+    # ssl_ca_location: path to a CA cert file (PEM) to trust the broker's TLS certificate —
+    # needed for a self-signed broker cert (real MSK's cert already chains to a public CA,
+    # so this stays unset there). Same self-signed-cert-pinning pattern already used for
+    # this project's pi-remote-access xpra direct-TLS setup, just applied to Kafka instead.
+    ssl_ca_location: str | None = None
 
     # Signal-flagging margin (dB above a bin's adaptive baseline) — irrelevant, so kept out
     # of RangeConfig/DeviceConfig entirely, when Kafka streaming isn't configured.
@@ -157,6 +171,9 @@ class KafkaViewerSettings(BaseSettings):
     region: str = "eu-central-1"
     security_protocol: str = "SASL_SSL"
     sasl_mechanism: str = "OAUTHBEARER"
+    sasl_username: str | None = None
+    sasl_password: str | None = None
+    ssl_ca_location: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="KAFKA__", extra="ignore")
 

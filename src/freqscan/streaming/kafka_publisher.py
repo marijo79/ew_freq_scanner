@@ -16,7 +16,17 @@ def oauth_cb(region: str):
     return callback
 
 
-def build_producer(settings: KafkaSettings) -> Producer:
+def build_client_config(settings) -> dict:
+    """Shared bootstrap/security config for both the producer (this module) and the
+    read-only viewer's consumer (kafka_consumer.py) -- duck-typed against KafkaSettings/
+    KafkaViewerSettings, which carry the same connection fields independently (see
+    config.py's own note on why they're separate classes).
+
+    OAUTHBEARER (real MSK) always signs its own token via oauth_cb and ignores
+    sasl_username/sasl_password entirely; SCRAM-SHA-256/512 and PLAIN use those two
+    fields directly instead. ssl_ca_location is for pinning a self-signed broker
+    cert (e.g. a self-hosted SASL_SSL broker) -- unset for real MSK, whose cert
+    already chains to a public CA."""
     config = {
         "bootstrap.servers": settings.bootstrap_servers,
         "security.protocol": settings.security_protocol,
@@ -25,7 +35,16 @@ def build_producer(settings: KafkaSettings) -> Producer:
         config["sasl.mechanisms"] = settings.sasl_mechanism
         if settings.sasl_mechanism == "OAUTHBEARER":
             config["oauth_cb"] = oauth_cb(settings.region)
-    return Producer(config)
+        elif settings.sasl_username is not None:
+            config["sasl.username"] = settings.sasl_username
+            config["sasl.password"] = settings.sasl_password
+    if settings.ssl_ca_location:
+        config["ssl.ca.location"] = settings.ssl_ca_location
+    return config
+
+
+def build_producer(settings: KafkaSettings) -> Producer:
+    return Producer(build_client_config(settings))
 
 
 def build_payload(channel_label: str, bins: list[tuple[float, float]], timestamp: float) -> dict:
