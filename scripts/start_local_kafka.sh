@@ -40,6 +40,20 @@ BROKER_PORT="${BROKER_PORT:-9092}"
 SIGNALS_TOPIC="${KAFKA_TOPIC:-freqscan.signals}"
 METADATA_TOPIC="${KAFKA_METADATA_TOPIC:-freqscan.signals.metadata}"
 TOPIC_PARTITIONS="${TOPIC_PARTITIONS:-6}"
+# ADMIN_BOOTSTRAP/KAFKA_CLIENT_CONFIG: for a broker secured with SASL_SSL (e.g. the
+# pi-remote-access tunnel VM's broker, see project_vm_kafka_broker memory) instead of
+# this script's default open-localhost dev setup — "localhost" won't pass that broker's
+# TLS hostname check (the cert only covers the broker's real hostname), and an
+# unauthenticated kafka-topics.sh call gets rejected outright, not just a plaintext
+# no-op, once the listener is SASL_SSL-only. Both default to the plain local-broker
+# behavior (localhost, no --command-config) so this is backward compatible.
+#   ADMIN_BOOTSTRAP=marius.vilimas.net:9092 KAFKA_CLIENT_CONFIG=~/kafka/tls/admin-client.properties \
+#     KAFKA_HOME=~/kafka/kafka_2.13-4.3.1 scripts/start_local_kafka.sh
+ADMIN_BOOTSTRAP="${ADMIN_BOOTSTRAP:-localhost:${BROKER_PORT}}"
+CLIENT_CONFIG_ARGS=()
+if [[ -n "${KAFKA_CLIENT_CONFIG:-}" ]]; then
+    CLIENT_CONFIG_ARGS=(--command-config "$KAFKA_CLIENT_CONFIG")
+fi
 
 if [[ ! -f "$CONFIG" ]]; then
     echo "error: no server.properties at $CONFIG (set KAFKA_HOME to your Kafka install dir)" >&2
@@ -48,17 +62,17 @@ fi
 
 ensure_topic() {
     local topic="$1" desired="$2" describe current
-    if describe="$("$KAFKA_HOME/bin/kafka-topics.sh" --bootstrap-server "localhost:${BROKER_PORT}" --describe --topic "$topic" 2>/dev/null)"; then
+    if describe="$("$KAFKA_HOME/bin/kafka-topics.sh" --bootstrap-server "$ADMIN_BOOTSTRAP" "${CLIENT_CONFIG_ARGS[@]}" --describe --topic "$topic" 2>/dev/null)"; then
         current="$(grep -oP '(?<=PartitionCount: )\d+' <<<"$describe" | head -1)"
         if [[ "$current" -lt "$desired" ]]; then
             echo "Topic $topic has $current partition(s), raising to $desired..."
-            "$KAFKA_HOME/bin/kafka-topics.sh" --bootstrap-server "localhost:${BROKER_PORT}" --alter --topic "$topic" --partitions "$desired"
+            "$KAFKA_HOME/bin/kafka-topics.sh" --bootstrap-server "$ADMIN_BOOTSTRAP" "${CLIENT_CONFIG_ARGS[@]}" --alter --topic "$topic" --partitions "$desired"
         else
             echo "Topic $topic already has $current partition(s) (>= $desired) — leaving as-is."
         fi
     else
         echo "Creating topic $topic with $desired partition(s)..."
-        "$KAFKA_HOME/bin/kafka-topics.sh" --bootstrap-server "localhost:${BROKER_PORT}" --create --topic "$topic" --partitions "$desired" --replication-factor 1
+        "$KAFKA_HOME/bin/kafka-topics.sh" --bootstrap-server "$ADMIN_BOOTSTRAP" "${CLIENT_CONFIG_ARGS[@]}" --create --topic "$topic" --partitions "$desired" --replication-factor 1
     fi
 }
 
