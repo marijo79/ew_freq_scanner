@@ -5,6 +5,9 @@ __pycache__/
 .venv/
 .env
 .idea/
+# Kafka broker TLS cert copied locally for KAFKA__SSL_CA_LOCATION (public cert, not a
+# secret itself, but device-local config like .env — see project_vm_kafka_broker memory).
+kafka-ca.pem
 
 # Terraform (terraform/) — state contains the producer IAM user's plaintext
 # secret access key, treat it like a credentials file.

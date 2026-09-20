@@ -120,7 +120,7 @@ class KafkaConsumerBackend(SDRBackend):
                     channel.state.sweep[float(f)] = float("nan")
             self.channels.append(channel)
             self._canonical_freqs.append(freqs)
-        print(f"freqscan-viewer: got metadata for {n_partitions} channel(s)", flush=True)
+        print(f"freqscan-viewer: got metadata for {n_channels} channel(s)", flush=True)
 
     def _partition_count(self, topic: str) -> int:
         metadata = self._consumer.list_topics(topic, timeout=10)

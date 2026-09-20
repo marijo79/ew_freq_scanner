@@ -50,13 +50,23 @@ def initial_ylim(channel: Channel, margin_db: float = 15.0, timeout: float = 2.0
     instead of one hardcoded guess that can't fit every backend's real scale. Falls
     back to FALLBACK_SPECTRUM_YLIM if no data arrives within `timeout` (backend.
     wait_ready() already ran before this, so data has usually already arrived by the
-    time this is called -- the wait below is just a safety margin, not the common case)."""
+    time this is called -- the wait below is just a safety margin, not the common case).
+
+    Filters out NaN before checking for "any data yet" -- required for
+    KafkaConsumerBackend, whose state.sweep is pre-populated with NaN for every
+    declared grid bin at construction (see its own docstring), so a plain truthiness/
+    non-empty check on the dict passes immediately even with zero real (flagged) bins
+    received yet, before any real signal has arrived over Kafka. Found live 2026-09-20
+    running the viewer against a real, sparse (flagged-bins-only) topic: min/max over an
+    all-NaN list is NaN, which crashed pyqtgraph_backend's setYRange(nan, nan) outright
+    instead of waiting/falling back like this was meant to. A no-op for every other
+    backend, whose state.sweep only ever holds real values once a hop actually lands."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         with channel.state.lock:
-            if channel.state.sweep:
-                powers = list(channel.state.sweep.values())
-                return (min(powers) - margin_db, max(powers) + margin_db)
+            powers = [p for p in channel.state.sweep.values() if not np.isnan(p)]
+        if powers:
+            return (min(powers) - margin_db, max(powers) + margin_db)
         time.sleep(0.05)
     return FALLBACK_SPECTRUM_YLIM
 
@@ -77,13 +87,16 @@ def initial_waterfall_clim(
     unusually quiet dip could drag down further than is representative); span_db is the
     dynamic range stretched across the rest of the colormap above that floor. A signal
     stronger than floor + span_db simply clips to the colormap's hottest color, which is
-    normal and expected -- SDR++'s own fixed sliders clip the same way."""
+    normal and expected -- SDR++'s own fixed sliders clip the same way.
+
+    Same NaN-filtering as initial_ylim() and for the same reason -- see its docstring."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         with channel.state.lock:
-            if channel.state.sweep:
-                floor = float(np.percentile(list(channel.state.sweep.values()), floor_percentile))
-                return (floor - floor_margin_db, floor + span_db)
+            powers = [p for p in channel.state.sweep.values() if not np.isnan(p)]
+        if powers:
+            floor = float(np.percentile(powers, floor_percentile))
+            return (floor - floor_margin_db, floor + span_db)
         time.sleep(0.05)
     return FALLBACK_SPECTRUM_YLIM
 
