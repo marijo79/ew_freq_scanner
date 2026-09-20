@@ -13,6 +13,12 @@ class SweepState:
     sweep: dict = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
     history: deque = field(default_factory=deque)
+    # Display-only smoothing state (plotting.common.channel_snapshot()'s concern only,
+    # same as `history` -- producers never touch these).
+    last_raw_freqs: "np.ndarray | None" = None
+    last_raw_powers: "np.ndarray | None" = None
+    display_avg: "np.ndarray | None" = None
+    display_avg_freqs: "np.ndarray | None" = None
 
 
 @dataclass

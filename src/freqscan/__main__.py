@@ -23,18 +23,32 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="publish flagged signal bins to Kafka (requires KAFKA__* configured in .env)",
     )
+    parser.add_argument(
+        "--csv",
+        metavar="DIR",
+        default=None,
+        help=(
+            "dump every raw sweep bin (timestamp, freq_hz, power_dbm) to one CSV file per "
+            "channel in this directory, named <device>_<freq_start-freq_stop>MHz_<yyyymmddHHMMSS>.csv "
+            "(created if missing)"
+        ),
+    )
     args = parser.parse_args()
-    if not args.plot and not args.kafka_publisher:
-        parser.error("at least one of --plot or --kafka_publisher must be given")
+    if not args.plot and not args.kafka_publisher and not args.csv:
+        parser.error("at least one of --plot, --kafka_publisher, or --csv must be given")
     return args
 
 
 def run_headless(backend: SDRBackend) -> None:
-    print("freqscan: sending to Kafka started; reporting offsets every 10s", flush=True)
+    if backend.publisher is not None:
+        print("freqscan: sending to Kafka started; reporting offsets every 10s", flush=True)
+    else:
+        print("freqscan: running headless (no --plot)", flush=True)
     try:
         while True:
             time.sleep(OFFSET_REPORT_INTERVAL)
-            print(f"freqscan: kafka offsets: {backend.publisher.offsets()}", flush=True)
+            if backend.publisher is not None:
+                print(f"freqscan: kafka offsets: {backend.publisher.offsets()}", flush=True)
     except KeyboardInterrupt:
         pass
     finally:
@@ -50,7 +64,7 @@ def main() -> None:
         print("freqscan: --kafka_publisher given but no KAFKA__* configured in .env", file=sys.stderr)
         sys.exit(1)
 
-    backend = build_backend(settings)
+    backend = build_backend(settings, csv_dir=args.csv)
     backend.start()
 
     if not backend.wait_ready(STARTUP_GRACE_PERIOD):
@@ -59,7 +73,7 @@ def main() -> None:
         sys.exit(1)
 
     if args.plot:
-        run(backend, settings.waterfall_rows)
+        run(backend, settings.waterfall_rows, settings.plot_refresh_ms, settings.plot_backend)
     else:
         run_headless(backend)
 

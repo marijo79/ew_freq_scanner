@@ -19,6 +19,12 @@ dependencies = [
 dev = [
     "pytest>=8.0",
 ]
+# Only needed for PLOT_BACKEND=pyqtgraph (see freqscan.config.Settings.plot_backend) --
+# matplotlib (the default) needs none of this.
+plot-pyqtgraph = [
+    "pyqtgraph>=0.13",
+    "PySide6>=6.5",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

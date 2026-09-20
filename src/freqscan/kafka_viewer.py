@@ -16,6 +16,12 @@ def parse_args() -> argparse.Namespace:
         default=100,
         help="number of past sweeps kept per channel for the waterfall display (default: 100)",
     )
+    parser.add_argument(
+        "--plot-backend",
+        choices=["matplotlib", "pyqtgraph"],
+        default="matplotlib",
+        help="which plotting/*_backend.py implementation renders the window (default: matplotlib)",
+    )
     return parser.parse_args()
 
 
@@ -30,7 +36,7 @@ def main() -> None:
         print("freqscan-viewer: failed to connect to Kafka.", file=sys.stderr)
         sys.exit(1)
 
-    run(backend, args.waterfall_rows)
+    run(backend, args.waterfall_rows, plot_backend=args.plot_backend)
 
 
 if __name__ == "__main__":

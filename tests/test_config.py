@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from freqscan.config import KafkaViewerSettings, Settings
+from freqscan.config import KafkaViewerSettings, PlutoChannelConfig, Settings
 
 
 def test_rtl_settings_load_from_env(monkeypatch):
@@ -54,6 +54,112 @@ def test_hackrf_settings_load_from_env(monkeypatch):
     assert settings.rtl is None
 
 
+def test_pluto_settings_load_from_env(monkeypatch):
+    monkeypatch.setenv("PLUTO__URI", "ip:192.168.2.1")
+    monkeypatch.setenv("PLUTO__BIN_WIDTH", "50000")
+    monkeypatch.setenv("PLUTO__CAPTURE_BANDWIDTH", "20000000")
+    monkeypatch.setenv(
+        "PLUTO__CHANNELS", json.dumps([{"channel": 1, "gain_control_mode": "manual", "hardwaregain": 40.0}])
+    )
+    monkeypatch.setenv(
+        "PLUTO__RANGES",
+        json.dumps([{"freq_start": 100, "freq_stop": 115, "edge_trim": 0.1}]),
+    )
+
+    settings = Settings(_env_file=None)
+
+    assert settings.pluto is not None
+    assert settings.pluto.uri == "ip:192.168.2.1"
+    assert settings.pluto.bin_width == 50000
+    assert settings.pluto.capture_bandwidth == 20000000
+    assert settings.pluto.channels == [
+        PlutoChannelConfig(channel=1, gain_control_mode="manual", hardwaregain=40.0)
+    ]
+    assert settings.pluto.ranges[0].freq_start == 100
+    assert settings.rtl is None
+    assert settings.hackrf is None
+
+
+def test_pluto_channels_defaults_to_single_rx1(monkeypatch):
+    monkeypatch.setenv("PLUTO__BIN_WIDTH", "50000")
+    monkeypatch.setenv(
+        "PLUTO__RANGES",
+        json.dumps([{"freq_start": 100, "freq_stop": 115}]),
+    )
+
+    settings = Settings(_env_file=None)
+
+    assert settings.pluto.channels == [PlutoChannelConfig(channel=1)]
+
+
+def test_pluto_channels_rejects_duplicate_channel_numbers(monkeypatch):
+    monkeypatch.setenv("PLUTO__BIN_WIDTH", "50000")
+    monkeypatch.setenv(
+        "PLUTO__RANGES",
+        json.dumps([{"freq_start": 100, "freq_stop": 115}]),
+    )
+    monkeypatch.setenv("PLUTO__CHANNELS", json.dumps([{"channel": 1}, {"channel": 1}]))
+
+    with pytest.raises(ValueError):
+        Settings(_env_file=None)
+
+
+def test_pluto_two_channels_load_from_env(monkeypatch):
+    monkeypatch.setenv("PLUTO__BIN_WIDTH", "50000")
+    monkeypatch.setenv(
+        "PLUTO__RANGES",
+        json.dumps([{"freq_start": 100, "freq_stop": 115}]),
+    )
+    monkeypatch.setenv(
+        "PLUTO__CHANNELS",
+        json.dumps([{"channel": 1, "hardwaregain": 30.0}, {"channel": 2, "hardwaregain": 50.0}]),
+    )
+
+    settings = Settings(_env_file=None)
+
+    assert [c.channel for c in settings.pluto.channels] == [1, 2]
+    assert [c.hardwaregain for c in settings.pluto.channels] == [30.0, 50.0]
+
+
+def test_pluto_stare_settings_load_from_env(monkeypatch):
+    monkeypatch.setenv("PLUTO_STARE__URI", "ip:192.168.2.1")
+    monkeypatch.setenv("PLUTO_STARE__FREQUENCY", "2437")
+    monkeypatch.setenv("PLUTO_STARE__BIN_WIDTH", "10000")
+    monkeypatch.setenv("PLUTO_STARE__SAMPLE_RATE", "20000000")
+    monkeypatch.setenv("PLUTO_STARE__EDGE_TRIM", "0.1")
+    monkeypatch.setenv(
+        "PLUTO_STARE__CHANNELS", json.dumps([{"channel": 1, "gain_control_mode": "manual", "hardwaregain": 40.0}])
+    )
+
+    settings = Settings(_env_file=None)
+
+    assert settings.pluto_stare is not None
+    assert settings.pluto_stare.uri == "ip:192.168.2.1"
+    assert settings.pluto_stare.frequency == 2437
+    assert settings.pluto_stare.bin_width == 10000
+    assert settings.pluto_stare.sample_rate == 20000000
+    assert settings.pluto_stare.edge_trim == 0.1
+    assert settings.pluto_stare.channels == [
+        PlutoChannelConfig(channel=1, gain_control_mode="manual", hardwaregain=40.0)
+    ]
+    assert settings.pluto is None
+    assert settings.rtl is None
+    assert settings.hackrf is None
+
+
+def test_pluto_sweep_and_stare_cannot_both_be_configured(monkeypatch):
+    monkeypatch.setenv(
+        "PLUTO__RANGES",
+        json.dumps([{"freq_start": 100, "freq_stop": 115}]),
+    )
+    monkeypatch.setenv("PLUTO__BIN_WIDTH", "50000")
+    monkeypatch.setenv("PLUTO_STARE__FREQUENCY", "2437")
+    monkeypatch.setenv("PLUTO_STARE__BIN_WIDTH", "10000")
+
+    with pytest.raises(ValueError):
+        Settings(_env_file=None)
+
+
 def test_both_backends_configured(monkeypatch):
     monkeypatch.setenv(
         "RTL__DEVICES",
@@ -74,6 +180,8 @@ def test_both_backends_configured(monkeypatch):
 def test_no_backend_configured_raises(monkeypatch):
     monkeypatch.delenv("RTL__DEVICES", raising=False)
     monkeypatch.delenv("HACKRF__RANGES", raising=False)
+    monkeypatch.delenv("PLUTO__RANGES", raising=False)
+    monkeypatch.delenv("PLUTO_STARE__FREQUENCY", raising=False)
 
     with pytest.raises(ValueError):
         Settings(_env_file=None)
@@ -126,12 +234,14 @@ def test_kafka_margins_keyed_by_id_and_range_index(monkeypatch):
     monkeypatch.setenv("KAFKA__SIGNAL_MARGIN_DB", "8.0")
     monkeypatch.setenv("KAFKA__RTL_MARGINS_DB", json.dumps({"0": 5.0}))
     monkeypatch.setenv("KAFKA__HACKRF_MARGINS_DB", json.dumps({"1": 12.0}))
+    monkeypatch.setenv("KAFKA__PLUTO_MARGINS_DB", json.dumps({"0": 6.0}))
 
     settings = Settings(_env_file=None)
 
     assert settings.kafka.signal_margin_db == 8.0
     assert settings.kafka.rtl_margins_db == {0: 5.0}
     assert settings.kafka.hackrf_margins_db == {1: 12.0}
+    assert settings.kafka.pluto_margins_db == {0: 6.0}
 
 
 def test_kafka_spatial_margin_defaults_to_none_disabled(monkeypatch):

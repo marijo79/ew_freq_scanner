@@ -1,13 +1,27 @@
 import json
 
-from freqscan.config import DeviceConfig, HackRFSettings, KafkaSettings, RangeConfig, RTLSettings, Settings
+from freqscan.config import (
+    DeviceConfig,
+    HackRFSettings,
+    KafkaSettings,
+    PlutoChannelConfig,
+    PlutoSettings,
+    PlutoStareSettings,
+    RangeConfig,
+    RTLSettings,
+    Settings,
+)
 from freqscan.sdr import build_backend
 from freqscan.sdr.base import CompositeBackend
 from freqscan.sdr.hackrf import HackRFBackend
+from freqscan.sdr.pluto import PlutoBackend
+from freqscan.sdr.pluto_stare import PlutoStareBackend
 from freqscan.sdr.rtl import RTLBackend
 
 _RTL = RTLSettings(devices=[DeviceConfig(id=0, freq_start="80M", freq_stop="120M")])
 _HACKRF = HackRFSettings(bin_width=20000, ranges=[RangeConfig(freq_start=850, freq_stop=950)])
+_PLUTO = PlutoSettings(bin_width=50000, ranges=[RangeConfig(freq_start=100, freq_stop=115)])
+_PLUTO_STARE = PlutoStareSettings(frequency=2437, bin_width=10000, sample_rate=20_000_000)
 
 
 class _FakeProducer:
@@ -41,6 +55,63 @@ def test_build_backend_hackrf_only():
     assert len(backend.channels) == 1
 
 
+def test_build_backend_pluto_only():
+    settings = Settings(_env_file=None, rtl=None, hackrf=None, pluto=_PLUTO)
+    backend = build_backend(settings)
+    assert isinstance(backend, PlutoBackend)
+    assert len(backend.channels) == 1
+    assert backend.channels[0].label == "Pluto RX1: 100-115 MHz"
+
+
+def test_build_backend_pluto_stare_only():
+    settings = Settings(_env_file=None, rtl=None, hackrf=None, pluto=None, pluto_stare=_PLUTO_STARE)
+    backend = build_backend(settings)
+    assert isinstance(backend, PlutoStareBackend)
+    assert len(backend.channels) == 1
+    assert backend.channels[0].label == "Pluto RX1 (stare): 2437.000 MHz"
+    # 20MHz sample rate centered on 2437MHz -> 2427-2447MHz before edge trimming
+    assert backend.channels[0].freq_start_mhz == 2427.0
+    assert backend.channels[0].freq_stop_mhz == 2447.0
+
+
+def test_build_backend_pluto_two_rx_channels_creates_channel_per_rx_times_range():
+    # RX channel is the outer grouping: 2 ranges x 2 RX channels = 4 plot channels,
+    # ordered [RX1's 2 ranges, RX2's 2 ranges] (see PlutoBackend._make_channels).
+    pluto = PlutoSettings(
+        bin_width=50000,
+        ranges=[
+            RangeConfig(freq_start=100, freq_stop=115),
+            RangeConfig(freq_start=400, freq_stop=420),
+        ],
+        channels=[PlutoChannelConfig(channel=1), PlutoChannelConfig(channel=2)],
+    )
+    settings = Settings(_env_file=None, rtl=None, hackrf=None, pluto=pluto)
+    backend = build_backend(settings)
+    assert isinstance(backend, PlutoBackend)
+    assert [c.label for c in backend.channels] == [
+        "Pluto RX1: 100-115 MHz",
+        "Pluto RX1: 400-420 MHz",
+        "Pluto RX2: 100-115 MHz",
+        "Pluto RX2: 400-420 MHz",
+    ]
+
+
+def test_build_backend_pluto_stare_two_rx_channels_creates_two_plot_channels():
+    pluto_stare = PlutoStareSettings(
+        frequency=2437,
+        bin_width=10000,
+        sample_rate=20_000_000,
+        channels=[PlutoChannelConfig(channel=1), PlutoChannelConfig(channel=2)],
+    )
+    settings = Settings(_env_file=None, rtl=None, hackrf=None, pluto=None, pluto_stare=pluto_stare)
+    backend = build_backend(settings)
+    assert isinstance(backend, PlutoStareBackend)
+    assert [c.label for c in backend.channels] == [
+        "Pluto RX1 (stare): 2437.000 MHz",
+        "Pluto RX2 (stare): 2437.000 MHz",
+    ]
+
+
 def test_build_backend_both_combines_channels_rtl_first():
     settings = Settings(_env_file=None, rtl=_RTL, hackrf=_HACKRF)
     backend = build_backend(settings)
@@ -48,6 +119,28 @@ def test_build_backend_both_combines_channels_rtl_first():
     assert len(backend.channels) == 2
     assert backend.channels[0].label == "RTL: Dev0 80-120 MHz"
     assert backend.channels[1].label == "HackRF: 850-950 MHz"
+
+
+def test_build_backend_all_three_combines_channels_rtl_hackrf_pluto_order():
+    settings = Settings(_env_file=None, rtl=_RTL, hackrf=_HACKRF, pluto=_PLUTO)
+    backend = build_backend(settings)
+    assert isinstance(backend, CompositeBackend)
+    assert len(backend.channels) == 3
+    assert backend.channels[0].label == "RTL: Dev0 80-120 MHz"
+    assert backend.channels[1].label == "HackRF: 850-950 MHz"
+    assert backend.channels[2].label == "Pluto RX1: 100-115 MHz"
+
+
+def test_build_backend_rtl_hackrf_pluto_stare_combines_in_order():
+    # pluto_stare can run alongside RTL/HackRF (different physical devices) even though
+    # it can't run alongside pluto (sweep) itself -- same exclusive-access radio.
+    settings = Settings(_env_file=None, rtl=_RTL, hackrf=_HACKRF, pluto=None, pluto_stare=_PLUTO_STARE)
+    backend = build_backend(settings)
+    assert isinstance(backend, CompositeBackend)
+    assert len(backend.channels) == 3
+    assert backend.channels[0].label == "RTL: Dev0 80-120 MHz"
+    assert backend.channels[1].label == "HackRF: 850-950 MHz"
+    assert backend.channels[2].label == "Pluto RX1 (stare): 2437.000 MHz"
 
 
 def test_build_backend_without_kafka_has_no_publisher_or_detectors():
@@ -258,6 +351,90 @@ def test_build_backend_publishes_hackrf_metadata_using_shared_bin_width(monkeypa
             "n_bins": 10_000,
         },
     ]
+
+
+def test_build_backend_publishes_pluto_metadata_using_shared_bin_width(monkeypatch):
+    producer = _FakeProducer()
+    monkeypatch.setattr("freqscan.sdr.build_producer", lambda kafka: producer)
+
+    kafka = KafkaSettings(enabled=True, bootstrap_servers="broker:9098")
+    pluto = PlutoSettings(
+        bin_width=50_000,
+        ranges=[
+            RangeConfig(freq_start=100, freq_stop=115),
+            RangeConfig(freq_start=400, freq_stop=420),
+        ],
+    )
+    settings = Settings(_env_file=None, rtl=None, hackrf=None, pluto=pluto, kafka=kafka)
+    build_backend(settings)
+
+    messages = _metadata_messages(producer, kafka.metadata_topic)
+    run_epochs = [m.pop("run_epoch") for m in messages]
+    assert len(set(run_epochs)) == 1
+    # bin_width_hz is PlutoSettings.bin_width for every range — pluto_sweep.py sweeps every
+    # configured range from one persistent connection with one shared FFT bin width.
+    assert messages == [
+        {
+            "channel": "Pluto RX1: 100-115 MHz",
+            "freq_start_hz": 100e6,
+            "freq_stop_hz": 115e6,
+            "bin_width_hz": 50_000,
+            "n_bins": 300,
+        },
+        {
+            "channel": "Pluto RX1: 400-420 MHz",
+            "freq_start_hz": 400e6,
+            "freq_stop_hz": 420e6,
+            "bin_width_hz": 50_000,
+            "n_bins": 400,
+        },
+    ]
+
+
+def test_build_backend_publishes_pluto_stare_metadata(monkeypatch):
+    producer = _FakeProducer()
+    monkeypatch.setattr("freqscan.sdr.build_producer", lambda kafka: producer)
+
+    kafka = KafkaSettings(enabled=True, bootstrap_servers="broker:9098")
+    pluto_stare = PlutoStareSettings(frequency=2437, bin_width=10_000, sample_rate=20_000_000)
+    settings = Settings(_env_file=None, rtl=None, hackrf=None, pluto=None, pluto_stare=pluto_stare, kafka=kafka)
+    build_backend(settings)
+
+    messages = _metadata_messages(producer, kafka.metadata_topic)
+    run_epochs = [m.pop("run_epoch") for m in messages]
+    assert len(set(run_epochs)) == 1
+    # freq_start/stop_hz span the full un-trimmed sample_rate window around frequency
+    # (2437MHz +/- 10MHz), not the post-edge-trim range -- same convention as PlutoSettings.
+    assert messages == [
+        {
+            "channel": "Pluto RX1 (stare): 2437.000 MHz",
+            "freq_start_hz": 2427e6,
+            "freq_stop_hz": 2447e6,
+            "bin_width_hz": 10_000,
+            "n_bins": 2000,
+        },
+    ]
+
+
+def test_build_backend_kafka_enabled_builds_per_range_pluto_margins(monkeypatch):
+    monkeypatch.setattr("freqscan.sdr.build_producer", lambda kafka: _FakeProducer())
+
+    kafka = KafkaSettings(
+        enabled=True,
+        bootstrap_servers="broker:9098",
+        signal_margin_db=8.0,
+        pluto_margins_db={0: 6.0},
+    )
+    pluto = PlutoSettings(
+        bin_width=50_000,
+        ranges=[
+            RangeConfig(freq_start=100, freq_stop=115),
+            RangeConfig(freq_start=400, freq_stop=420),
+        ],
+    )
+    settings = Settings(_env_file=None, rtl=None, hackrf=None, pluto=pluto, kafka=kafka)
+    backend = build_backend(settings)
+    assert [d.margin_db for d in backend._detectors] == [6.0, 8.0]
 
 
 def test_build_backend_without_kafka_does_not_call_flush_or_publish_metadata():

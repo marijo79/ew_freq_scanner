@@ -5,6 +5,7 @@ from collections import deque
 import numpy as np
 
 from freqscan.config import HackRFSettings, RangeConfig
+from freqscan.csv_writer import CsvSweepWriter
 from freqscan.parsing import parse_sweep_line, trim_edges
 from freqscan.sdr.base import Channel, SDRBackend, SweepState
 from freqscan.streaming.detector import NoiseFloorDetector, nearest_grid_index
@@ -31,6 +32,7 @@ class HackRFBackend(SDRBackend):
         detectors: list[NoiseFloorDetector] | None = None,
         partitions: list[int] | None = None,
         canonical_freqs: list[np.ndarray] | None = None,
+        csv_writers: list[CsvSweepWriter] | None = None,
     ):
         super().__init__()
         self.settings = settings
@@ -40,6 +42,7 @@ class HackRFBackend(SDRBackend):
         self._detectors = detectors
         self._partitions = partitions
         self._canonical_freqs = canonical_freqs
+        self._csv_writers = csv_writers
 
     def _range_index_for(self, hz_low: float) -> int | None:
         mhz = hz_low / 1e6
@@ -91,6 +94,9 @@ class HackRFBackend(SDRBackend):
                 for f, p in zip(freqs, powers):
                     channel.state.sweep[f] = p
 
+            if self._csv_writers is not None:
+                self._csv_writers[idx].write_hop(freqs, powers)
+
             if self._detectors is not None:
                 detector = self._detectors[idx]
                 partition = self._partitions[idx] if self._partitions is not None else -1
@@ -113,3 +119,6 @@ class HackRFBackend(SDRBackend):
             self._proc.terminate()
         if self._publisher is not None:
             self._publisher.flush()
+        for writer in self._csv_writers or []:
+            if writer is not None:
+                writer.close()

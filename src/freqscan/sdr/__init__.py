@@ -1,11 +1,16 @@
+import os
 import sys
 import time
+from datetime import datetime
 
 import numpy as np
 
-from freqscan.config import HackRFSettings, KafkaSettings, RTLSettings, Settings
+from freqscan.config import KafkaSettings, PlutoStareSettings, RangeConfig, RTLSettings, Settings
+from freqscan.csv_writer import CsvSweepWriter, make_csv_path
 from freqscan.sdr.base import Channel, CompositeBackend, SDRBackend
 from freqscan.sdr.hackrf import HackRFBackend
+from freqscan.sdr.pluto import PlutoBackend
+from freqscan.sdr.pluto_stare import PlutoStareBackend
 from freqscan.sdr.rtl import RTLBackend, freq_str_to_mhz
 from freqscan.streaming.detector import NoiseFloorDetector
 from freqscan.streaming.kafka_publisher import KafkaSignalPublisher, build_producer
@@ -26,14 +31,27 @@ def _rtl_channel_grids(rtl: RTLSettings) -> list[ChannelGrid]:
     return grids
 
 
-def _hackrf_channel_grids(hackrf: HackRFSettings) -> list[ChannelGrid]:
+def _range_channel_grids(ranges: list[RangeConfig], bin_width: int) -> list[ChannelGrid]:
+    """Shared by HackRF and Pluto: both are single-device backends with one shared
+    bin_width across all their configured ranges (unlike RTL's per-device bin_width)."""
     grids = []
-    for r in hackrf.ranges:
+    for r in ranges:
         freq_start_hz = r.freq_start * 1e6
         freq_stop_hz = r.freq_stop * 1e6
-        n_bins = round((freq_stop_hz - freq_start_hz) / hackrf.bin_width)
-        grids.append((freq_start_hz, freq_stop_hz, hackrf.bin_width, n_bins))
+        n_bins = round((freq_stop_hz - freq_start_hz) / bin_width)
+        grids.append((freq_start_hz, freq_stop_hz, bin_width, n_bins))
     return grids
+
+
+def _pluto_stare_channel_grids(pluto_stare: PlutoStareSettings) -> list[ChannelGrid]:
+    """One grid per configured RX channel (see PlutoChannelConfig) -- all identical since
+    RX1/RX2 physically share the same frequency/sample_rate/bin_width, just repeated once
+    per capture process/plot channel."""
+    freq_center_hz = pluto_stare.frequency * 1e6
+    half_span_hz = pluto_stare.sample_rate / 2
+    n_bins = round(pluto_stare.sample_rate / pluto_stare.bin_width)
+    grid = (freq_center_hz - half_span_hz, freq_center_hz + half_span_hz, pluto_stare.bin_width, n_bins)
+    return [grid] * len(pluto_stare.channels)
 
 
 def _canonical_freqs(grids: list[ChannelGrid]) -> list[np.ndarray]:
@@ -56,18 +74,28 @@ def _build_rtl_detectors(rtl: RTLSettings, kafka: KafkaSettings, grids: list[Cha
     ]
 
 
-def _build_hackrf_detectors(
-    hackrf: HackRFSettings, kafka: KafkaSettings, grids: list[ChannelGrid]
+def _build_range_detectors(
+    count: int,
+    kafka: KafkaSettings,
+    grids: list[ChannelGrid],
+    margins_db: dict[int, float],
+    spatial_margins_db: dict[int, float],
+    prominence_margins_db: dict[int, float],
 ) -> list[NoiseFloorDetector]:
+    """Shared by HackRF, Pluto (sweep), and Pluto (stare): all key their per-channel
+    margin overrides by 0-based index into their own ranges/channels list (unlike RTL,
+    keyed by DeviceConfig.id). `count` is `len(ranges)` for HackRF/Pluto-sweep or
+    `len(channels)` for Pluto-stare -- only the count matters here, not the list's own
+    element type."""
     return [
         NoiseFloorDetector(
             n_bins=grids[idx][3],
             window=kafka.baseline_window,
-            margin_db=kafka.hackrf_margins_db.get(idx, kafka.signal_margin_db),
-            spatial_margin_db=kafka.hackrf_spatial_margins_db.get(idx, kafka.spatial_margin_db),
-            prominence_margin_db=kafka.hackrf_prominence_margins_db.get(idx, kafka.prominence_margin_db),
+            margin_db=margins_db.get(idx, kafka.signal_margin_db),
+            spatial_margin_db=spatial_margins_db.get(idx, kafka.spatial_margin_db),
+            prominence_margin_db=prominence_margins_db.get(idx, kafka.prominence_margin_db),
         )
-        for idx in range(len(hackrf.ranges))
+        for idx in range(count)
     ]
 
 
@@ -84,12 +112,18 @@ def _publish_metadata(
         )
 
 
-def build_backend(settings: Settings) -> SDRBackend:
+def build_backend(settings: Settings, csv_dir: str | None = None) -> SDRBackend:
     kafka = settings.kafka
     streaming = kafka is not None and kafka.enabled
     publisher = (
         KafkaSignalPublisher(build_producer(kafka), kafka.topic, kafka.metadata_topic) if streaming else None
     )
+
+    # One shared timestamp for every CSV filename this run, so a run's files sort/group
+    # together rather than drifting apart by the few seconds it takes to start every channel.
+    csv_when = datetime.now() if csv_dir is not None else None
+    if csv_dir is not None:
+        os.makedirs(csv_dir, exist_ok=True)
 
     # Same value on every metadata message published this run, regardless of channel —
     # lets a viewer tell this run's fresh metadata apart from an older run's stale
@@ -105,25 +139,132 @@ def build_backend(settings: Settings) -> SDRBackend:
         n = len(settings.rtl.devices)
         partitions = list(range(next_partition, next_partition + n)) if streaming else None
         next_partition += n
+        csv_writers = (
+            [
+                CsvSweepWriter(make_csv_path(csv_dir, f"RTL-Dev{dev.id}", g[0] / 1e6, g[1] / 1e6, csv_when))
+                for dev, g in zip(settings.rtl.devices, grids)
+            ]
+            if csv_dir is not None
+            else None
+        )
         rtl_backend = RTLBackend(
-            settings.rtl, settings.waterfall_rows, publisher, detectors, partitions, canonical_freqs
+            settings.rtl, settings.waterfall_rows, publisher, detectors, partitions, canonical_freqs, csv_writers
         )
         if streaming:
             _publish_metadata(publisher, grids, rtl_backend.channels, partitions, run_epoch)
         backends.append(rtl_backend)
     if settings.hackrf is not None:
-        grids = _hackrf_channel_grids(settings.hackrf)
-        detectors = _build_hackrf_detectors(settings.hackrf, kafka, grids) if streaming else None
+        grids = _range_channel_grids(settings.hackrf.ranges, settings.hackrf.bin_width)
+        detectors = (
+            _build_range_detectors(
+                len(settings.hackrf.ranges),
+                kafka,
+                grids,
+                kafka.hackrf_margins_db,
+                kafka.hackrf_spatial_margins_db,
+                kafka.hackrf_prominence_margins_db,
+            )
+            if streaming
+            else None
+        )
         canonical_freqs = _canonical_freqs(grids) if streaming else None
         n = len(settings.hackrf.ranges)
         partitions = list(range(next_partition, next_partition + n)) if streaming else None
         next_partition += n
+        csv_writers = (
+            [CsvSweepWriter(make_csv_path(csv_dir, "HackRF", g[0] / 1e6, g[1] / 1e6, csv_when)) for g in grids]
+            if csv_dir is not None
+            else None
+        )
         hackrf_backend = HackRFBackend(
-            settings.hackrf, settings.waterfall_rows, publisher, detectors, partitions, canonical_freqs
+            settings.hackrf, settings.waterfall_rows, publisher, detectors, partitions, canonical_freqs, csv_writers
         )
         if streaming:
             _publish_metadata(publisher, grids, hackrf_backend.channels, partitions, run_epoch)
         backends.append(hackrf_backend)
+    if settings.pluto is not None:
+        # RX channel is the outer grouping (matches PlutoBackend._make_channels): for N
+        # ranges and M RX channels, grids/detectors/etc. repeat the same N-range layout
+        # once per channel. Margin overrides stay keyed by range index (0..N-1), same
+        # meaning for every RX channel, rather than a combined channel*range index --
+        # simpler to configure, and each channel still gets its own fresh detector
+        # instance (independent mutable state/history), not a shared one.
+        n_ranges = len(settings.pluto.ranges)
+        per_channel_grids = _range_channel_grids(settings.pluto.ranges, settings.pluto.bin_width)
+        grids = per_channel_grids * len(settings.pluto.channels)
+        detectors = (
+            [
+                d
+                for _ in settings.pluto.channels
+                for d in _build_range_detectors(
+                    n_ranges,
+                    kafka,
+                    per_channel_grids,
+                    kafka.pluto_margins_db,
+                    kafka.pluto_spatial_margins_db,
+                    kafka.pluto_prominence_margins_db,
+                )
+            ]
+            if streaming
+            else None
+        )
+        canonical_freqs = _canonical_freqs(grids) if streaming else None
+        n = len(grids)
+        partitions = list(range(next_partition, next_partition + n)) if streaming else None
+        next_partition += n
+        csv_writers = (
+            [
+                CsvSweepWriter(make_csv_path(csv_dir, f"Pluto-RX{ch.channel}", g[0] / 1e6, g[1] / 1e6, csv_when))
+                for ch in settings.pluto.channels
+                for g in per_channel_grids
+            ]
+            if csv_dir is not None
+            else None
+        )
+        pluto_backend = PlutoBackend(
+            settings.pluto, settings.waterfall_rows, publisher, detectors, partitions, canonical_freqs, csv_writers
+        )
+        if streaming:
+            _publish_metadata(publisher, grids, pluto_backend.channels, partitions, run_epoch)
+        backends.append(pluto_backend)
+    if settings.pluto_stare is not None:
+        grids = _pluto_stare_channel_grids(settings.pluto_stare)
+        detectors = (
+            _build_range_detectors(
+                len(settings.pluto_stare.channels),
+                kafka,
+                grids,
+                kafka.pluto_margins_db,
+                kafka.pluto_spatial_margins_db,
+                kafka.pluto_prominence_margins_db,
+            )
+            if streaming
+            else None
+        )
+        canonical_freqs = _canonical_freqs(grids) if streaming else None
+        n = len(settings.pluto_stare.channels)
+        partitions = list(range(next_partition, next_partition + n)) if streaming else None
+        next_partition += n
+        csv_writers = (
+            [
+                CsvSweepWriter(make_csv_path(csv_dir, f"Pluto-stare-RX{ch.channel}", g[0] / 1e6, g[1] / 1e6, csv_when))
+                for ch, g in zip(settings.pluto_stare.channels, grids)
+            ]
+            if csv_dir is not None
+            else None
+        )
+        pluto_stare_backend = PlutoStareBackend(
+            settings.pluto_stare,
+            settings.waterfall_rows,
+            publisher,
+            detectors,
+            partitions,
+            canonical_freqs,
+            csv_writers,
+        )
+        if streaming:
+            _publish_metadata(publisher, grids, pluto_stare_backend.channels, partitions, run_epoch)
+        backends.append(pluto_stare_backend)
     backend = backends[0] if len(backends) == 1 else CompositeBackend(backends)
     backend.publisher = publisher
     if streaming:

@@ -5,6 +5,7 @@ from collections import deque
 import numpy as np
 
 from freqscan.config import DeviceConfig, RTLSettings
+from freqscan.csv_writer import CsvSweepWriter
 from freqscan.parsing import parse_sweep_line
 from freqscan.sdr.base import Channel, SDRBackend, SweepState
 from freqscan.streaming.detector import NoiseFloorDetector, nearest_grid_index
@@ -44,6 +45,7 @@ class RTLBackend(SDRBackend):
         detectors: list[NoiseFloorDetector] | None = None,
         partitions: list[int] | None = None,
         canonical_freqs: list[np.ndarray] | None = None,
+        csv_writers: list[CsvSweepWriter] | None = None,
     ):
         super().__init__()
         self.settings = settings
@@ -54,16 +56,18 @@ class RTLBackend(SDRBackend):
         self._detectors = detectors
         self._partitions = partitions
         self._canonical_freqs = canonical_freqs
+        self._csv_writers = csv_writers
 
     def start(self) -> None:
         detectors = self._detectors or [None] * len(self.channels)
         partitions = self._partitions or [-1] * len(self.channels)
         canonical_freqs = self._canonical_freqs or [None] * len(self.channels)
-        for dev, channel, detector, partition, freqs in zip(
-            self.settings.devices, self.channels, detectors, partitions, canonical_freqs
+        csv_writers = self._csv_writers or [None] * len(self.channels)
+        for dev, channel, detector, partition, freqs, csv_writer in zip(
+            self.settings.devices, self.channels, detectors, partitions, canonical_freqs, csv_writers
         ):
             threading.Thread(
-                target=self._run_device, args=(dev, channel, detector, partition, freqs), daemon=True
+                target=self._run_device, args=(dev, channel, detector, partition, freqs, csv_writer), daemon=True
             ).start()
 
     def _run_device(
@@ -73,6 +77,7 @@ class RTLBackend(SDRBackend):
         detector: NoiseFloorDetector | None,
         partition: int,
         canonical_freqs: np.ndarray | None,
+        csv_writer: CsvSweepWriter | None,
     ) -> None:
         cmd = [
             "rtl_power",
@@ -104,6 +109,9 @@ class RTLBackend(SDRBackend):
                 for f, p in zip(freqs, line.powers):
                     channel.state.sweep[f] = p
 
+            if csv_writer is not None:
+                csv_writer.write_hop(freqs, line.powers)
+
             if detector is not None:
                 freqs_arr = np.asarray(freqs)
                 powers_arr = np.asarray(line.powers)
@@ -128,3 +136,6 @@ class RTLBackend(SDRBackend):
                 proc.terminate()
         if self._publisher is not None:
             self._publisher.flush()
+        for writer in self._csv_writers or []:
+            if writer is not None:
+                writer.close()
