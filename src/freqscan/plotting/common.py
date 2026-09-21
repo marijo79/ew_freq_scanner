@@ -117,17 +117,32 @@ def initial_freq_extent(channel: Channel, timeout: float = 2.0) -> tuple[float, 
     real content does -- confirmed live 2026-09-14 as exactly this symptom on a
     narrowed (90-110MHz) Pluto stare view, right after fixing a separate
     spectrum/waterfall pixel-alignment bug made the mismatch obvious. For RTL/HackRF/
-    Pluto-sweep and the Kafka viewer, real data converges to the same range as
-    channel.freq_start_mhz/freq_stop_mhz anyway (their declared range is already
-    clipped/published to match real achievable data -- see CLAUDE.md's sweep-mode
-    per-hop clipping and the Kafka viewer's metadata-driven pre-population), so this is
-    a safe, same-result substitution there, not a stare-mode-only special case."""
+    Pluto-sweep, real data converges to the same range as channel.freq_start_mhz/
+    freq_stop_mhz anyway (their declared range is already clipped/published to match
+    real achievable data), so filtering to real values here is a no-op there.
+
+    **Must filter to non-NaN values, not just look at dict keys** -- found live
+    2026-09-21 running kafka_viewer against a real Pluto-stare producer for the first
+    time and seeing a huge dead margin on both sides of the spectrum/waterfall. The
+    docstring above used to claim this was also a safe no-op for the Kafka viewer, on
+    the theory that KafkaConsumerBackend's declared channel.freq_start_mhz/
+    freq_stop_mhz already matches real achievable data -- wrong for a stare-mode
+    channel specifically: its published metadata grid IS the wide pre-trim span (same
+    grid the local producer declares), and KafkaConsumerBackend pre-populates every one
+    of those wide-grid frequencies as a NaN placeholder key at construction (see its own
+    docstring). So `channel.state.sweep.keys()` always already spans the full wide
+    range from the very first check, identical to channel.freq_start_mhz/freq_stop_mhz
+    -- this function was silently a no-op for the Kafka viewer the whole time, not
+    "safely" equivalent to one. Same root bug class as initial_ylim()/
+    initial_waterfall_clim()'s NaN-value crash fixed the day before; this one didn't
+    crash; it just never actually narrowed anything, permanently baking in a dead
+    margin the width of the trimmed-off edge on both sides of the plot."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         with channel.state.lock:
-            if channel.state.sweep:
-                freqs_hz = channel.state.sweep.keys()
-                return (min(freqs_hz) / 1e6, max(freqs_hz) / 1e6)
+            real_freqs_hz = [f for f, p in channel.state.sweep.items() if not np.isnan(p)]
+        if real_freqs_hz:
+            return (min(real_freqs_hz) / 1e6, max(real_freqs_hz) / 1e6)
         time.sleep(0.05)
     return (channel.freq_start_mhz, channel.freq_stop_mhz)
 
