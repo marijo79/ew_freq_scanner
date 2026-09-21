@@ -11,7 +11,7 @@ from freqscan.config import PlutoChannelConfig, PlutoStareSettings
 from freqscan.csv_writer import CsvSweepWriter
 from freqscan.parsing import parse_sweep_line
 from freqscan.sdr.base import Channel, SDRBackend, SweepState
-from freqscan.streaming.detector import NoiseFloorDetector, nearest_grid_index
+from freqscan.streaming.detector import KeyframeScheduler, NoiseFloorDetector, nearest_grid_index
 from freqscan.streaming.kafka_publisher import KafkaSignalPublisher
 
 _STARE_SCRIPT = Path(__file__).resolve().parent.parent.parent.parent / "scripts" / "pluto_stare.py"
@@ -77,6 +77,7 @@ class PlutoStareBackend(SDRBackend):
         partitions: list[int] | None = None,
         canonical_freqs: list[np.ndarray] | None = None,
         csv_writers: list[CsvSweepWriter] | None = None,
+        keyframes: list[KeyframeScheduler] | None = None,
     ):
         super().__init__()
         self.settings = settings
@@ -88,6 +89,7 @@ class PlutoStareBackend(SDRBackend):
         self._partitions = partitions
         self._canonical_freqs = canonical_freqs
         self._csv_writers = csv_writers
+        self._keyframes = keyframes
 
     def start(self) -> None:
         threading.Thread(target=self._run, daemon=True).start()
@@ -97,12 +99,13 @@ class PlutoStareBackend(SDRBackend):
         partitions = self._partitions or [-1] * len(self.channels)
         canonical_freqs = self._canonical_freqs or [None] * len(self.channels)
         csv_writers = self._csv_writers or [None] * len(self.channels)
+        keyframes = self._keyframes or [None] * len(self.channels)
         # Index everything by RX channel number so the single reader loop below can
         # route each tagged line to the right Channel/detector/csv_writer/partition.
         by_channel_num = {
-            ch.channel: (channel, detector, partition, freqs, csv_writer)
-            for ch, channel, detector, partition, freqs, csv_writer in zip(
-                self.settings.channels, self.channels, detectors, partitions, canonical_freqs, csv_writers
+            ch.channel: (channel, detector, partition, freqs, csv_writer, keyframe)
+            for ch, channel, detector, partition, freqs, csv_writer, keyframe in zip(
+                self.settings.channels, self.channels, detectors, partitions, canonical_freqs, csv_writers, keyframes
             )
         }
         channel_configs = [
@@ -138,7 +141,7 @@ class PlutoStareBackend(SDRBackend):
             routed = by_channel_num.get(channel_num)
             if routed is None:
                 continue
-            channel, detector, partition, canonical_freqs_arr, csv_writer = routed
+            channel, detector, partition, canonical_freqs_arr, csv_writer, keyframe = routed
 
             line = parse_sweep_line(rest)
             if line is None:
@@ -157,6 +160,10 @@ class PlutoStareBackend(SDRBackend):
                 flagged_mask = detector.flag_hop(indices, powers)
                 flagged = list(zip(freqs[flagged_mask].tolist(), powers[flagged_mask].tolist()))
                 self._publisher.publish(channel.label, flagged, partition=partition)
+                if keyframe is not None and keyframe.due():
+                    all_bins = list(zip(freqs.tolist(), powers.tolist()))
+                    self._publisher.publish(channel.label, all_bins, partition=partition)
+                    keyframe.mark_sent()
 
         proc.wait()
         if proc.returncode > 0:

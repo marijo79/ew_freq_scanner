@@ -12,7 +12,7 @@ from freqscan.sdr.hackrf import HackRFBackend
 from freqscan.sdr.pluto import PlutoBackend
 from freqscan.sdr.pluto_stare import PlutoStareBackend
 from freqscan.sdr.rtl import RTLBackend, freq_str_to_mhz
-from freqscan.streaming.detector import NoiseFloorDetector
+from freqscan.streaming.detector import KeyframeScheduler, NoiseFloorDetector
 from freqscan.streaming.kafka_publisher import KafkaSignalPublisher, build_producer
 
 # Each channel's grid: (freq_start_hz, freq_stop_hz, bin_width_hz, n_bins) — computed
@@ -99,6 +99,10 @@ def _build_range_detectors(
     ]
 
 
+def _build_keyframes(count: int, kafka: KafkaSettings) -> list[KeyframeScheduler]:
+    return [KeyframeScheduler(kafka.keyframe_interval_s) for _ in range(count)]
+
+
 def _publish_metadata(
     publisher: KafkaSignalPublisher,
     grids: list[ChannelGrid],
@@ -138,6 +142,7 @@ def build_backend(settings: Settings, csv_dir: str | None = None) -> SDRBackend:
         canonical_freqs = _canonical_freqs(grids) if streaming else None
         n = len(settings.rtl.devices)
         partitions = list(range(next_partition, next_partition + n)) if streaming else None
+        keyframes = _build_keyframes(n, kafka) if streaming else None
         next_partition += n
         csv_writers = (
             [
@@ -148,7 +153,14 @@ def build_backend(settings: Settings, csv_dir: str | None = None) -> SDRBackend:
             else None
         )
         rtl_backend = RTLBackend(
-            settings.rtl, settings.waterfall_rows, publisher, detectors, partitions, canonical_freqs, csv_writers
+            settings.rtl,
+            settings.waterfall_rows,
+            publisher,
+            detectors,
+            partitions,
+            canonical_freqs,
+            csv_writers,
+            keyframes,
         )
         if streaming:
             _publish_metadata(publisher, grids, rtl_backend.channels, partitions, run_epoch)
@@ -170,6 +182,7 @@ def build_backend(settings: Settings, csv_dir: str | None = None) -> SDRBackend:
         canonical_freqs = _canonical_freqs(grids) if streaming else None
         n = len(settings.hackrf.ranges)
         partitions = list(range(next_partition, next_partition + n)) if streaming else None
+        keyframes = _build_keyframes(n, kafka) if streaming else None
         next_partition += n
         csv_writers = (
             [CsvSweepWriter(make_csv_path(csv_dir, "HackRF", g[0] / 1e6, g[1] / 1e6, csv_when)) for g in grids]
@@ -177,7 +190,14 @@ def build_backend(settings: Settings, csv_dir: str | None = None) -> SDRBackend:
             else None
         )
         hackrf_backend = HackRFBackend(
-            settings.hackrf, settings.waterfall_rows, publisher, detectors, partitions, canonical_freqs, csv_writers
+            settings.hackrf,
+            settings.waterfall_rows,
+            publisher,
+            detectors,
+            partitions,
+            canonical_freqs,
+            csv_writers,
+            keyframes,
         )
         if streaming:
             _publish_metadata(publisher, grids, hackrf_backend.channels, partitions, run_epoch)
@@ -211,6 +231,7 @@ def build_backend(settings: Settings, csv_dir: str | None = None) -> SDRBackend:
         canonical_freqs = _canonical_freqs(grids) if streaming else None
         n = len(grids)
         partitions = list(range(next_partition, next_partition + n)) if streaming else None
+        keyframes = _build_keyframes(n, kafka) if streaming else None
         next_partition += n
         csv_writers = (
             [
@@ -222,7 +243,14 @@ def build_backend(settings: Settings, csv_dir: str | None = None) -> SDRBackend:
             else None
         )
         pluto_backend = PlutoBackend(
-            settings.pluto, settings.waterfall_rows, publisher, detectors, partitions, canonical_freqs, csv_writers
+            settings.pluto,
+            settings.waterfall_rows,
+            publisher,
+            detectors,
+            partitions,
+            canonical_freqs,
+            csv_writers,
+            keyframes,
         )
         if streaming:
             _publish_metadata(publisher, grids, pluto_backend.channels, partitions, run_epoch)
@@ -244,6 +272,7 @@ def build_backend(settings: Settings, csv_dir: str | None = None) -> SDRBackend:
         canonical_freqs = _canonical_freqs(grids) if streaming else None
         n = len(settings.pluto_stare.channels)
         partitions = list(range(next_partition, next_partition + n)) if streaming else None
+        keyframes = _build_keyframes(n, kafka) if streaming else None
         next_partition += n
         csv_writers = (
             [
@@ -261,6 +290,7 @@ def build_backend(settings: Settings, csv_dir: str | None = None) -> SDRBackend:
             partitions,
             canonical_freqs,
             csv_writers,
+            keyframes,
         )
         if streaming:
             _publish_metadata(publisher, grids, pluto_stare_backend.channels, partitions, run_epoch)

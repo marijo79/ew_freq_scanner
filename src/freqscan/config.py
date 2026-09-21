@@ -107,6 +107,21 @@ class KafkaSettings(BaseModel):
     metadata_topic: str = "freqscan.signals.metadata"
     region: str = "eu-central-1"
     baseline_window: int = 50  # readings per bin kept for the rolling noise-floor baseline
+    # keyframe_interval_s: how often (seconds) each channel also publishes a full
+    # keyframe — every bin of its current hop, not just the ones flag_hop() flagged.
+    # None (default) disables this entirely, matching the original design where the
+    # topic only ever carries flagged bins. Added because a consumer (e.g. kafka_viewer)
+    # otherwise only ever sees genuinely flagged bins and nothing else — every other bin
+    # stays NaN forever, which renders as gaps with no noise-floor/baseline reference at
+    # all, not just "no signal here right now". A keyframe is scoped to whatever one hop
+    # currently covers (a full channel width for Pluto stare's single fixed window; one
+    # sweep segment for RTL/HackRF/Pluto sweep, which naturally accumulates a full-width
+    # baseline over a sweep cycle as each segment's own keyframe comes due in turn) —
+    # same per-hop granularity as the existing flagged-bin publish, not a separate
+    # full-channel-wide message. Keep this well above the time one real hop takes, or
+    # every hop just becomes a keyframe (defeating the noise-floor filtering's whole
+    # point of cutting Kafka volume — see STATS.md's measured message-volume savings).
+    keyframe_interval_s: float | None = None
 
     # Real MSK always uses SASL/IAM; override to "PLAINTEXT"/"" for a local, non-MSK broker
     # (e.g. a native Kafka instance used to smoke-test the producer without touching AWS),

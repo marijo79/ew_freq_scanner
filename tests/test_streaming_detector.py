@@ -1,6 +1,25 @@
 import numpy as np
 
-from freqscan.streaming.detector import NoiseFloorDetector, nearest_grid_index
+from freqscan.streaming.detector import KeyframeScheduler, NoiseFloorDetector, nearest_grid_index
+
+
+def test_keyframe_scheduler_disabled_never_due():
+    scheduler = KeyframeScheduler(interval_s=None)
+    assert scheduler.due(now=0.0) is False
+    scheduler.mark_sent(now=0.0)
+    assert scheduler.due(now=1_000_000.0) is False
+
+
+def test_keyframe_scheduler_due_immediately_on_construction():
+    scheduler = KeyframeScheduler(interval_s=5.0)
+    assert scheduler.due(now=0.0) is True
+
+
+def test_keyframe_scheduler_not_due_until_interval_elapses():
+    scheduler = KeyframeScheduler(interval_s=5.0)
+    scheduler.mark_sent(now=100.0)
+    assert scheduler.due(now=104.9) is False
+    assert scheduler.due(now=105.0) is True
 
 
 def test_nearest_grid_index_array_input():

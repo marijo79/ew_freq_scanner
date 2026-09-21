@@ -1,6 +1,34 @@
+import time
 from dataclasses import dataclass, field
 
 import numpy as np
+
+
+class KeyframeScheduler:
+    """Tracks whether it's time to publish a full-spectrum "keyframe" for one channel --
+    every bin of the current hop, not just the ones NoiseFloorDetector.flag_hop()
+    flagged (see KafkaSettings.keyframe_interval_s). Deliberately dumb/stateless beyond
+    one timestamp: each backend calls due() right where it already checks flag_hop()'s
+    result, and mark_sent() right after actually publishing a keyframe -- same call site,
+    same per-hop granularity, just an additional independent publish.
+
+    interval_s=None disables keyframes entirely (due() always False, mark_sent() a
+    no-op) -- the KafkaSettings default, so this is opt-in per deployment. due() is
+    True immediately on construction (next_at starts at 0.0) so a fresh consumer gets a
+    real baseline on the very first hop instead of waiting a full interval first."""
+
+    def __init__(self, interval_s: float | None):
+        self._interval = interval_s
+        self._next_at = 0.0
+
+    def due(self, now: float | None = None) -> bool:
+        if self._interval is None:
+            return False
+        return (now if now is not None else time.time()) >= self._next_at
+
+    def mark_sent(self, now: float | None = None) -> None:
+        if self._interval is not None:
+            self._next_at = (now if now is not None else time.time()) + self._interval
 
 
 def nearest_grid_index(canonical_freqs: np.ndarray, freq_hz):

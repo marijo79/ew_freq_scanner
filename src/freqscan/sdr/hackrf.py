@@ -8,7 +8,7 @@ from freqscan.config import HackRFSettings, RangeConfig
 from freqscan.csv_writer import CsvSweepWriter
 from freqscan.parsing import parse_sweep_line, trim_edges
 from freqscan.sdr.base import Channel, SDRBackend, SweepState
-from freqscan.streaming.detector import NoiseFloorDetector, nearest_grid_index
+from freqscan.streaming.detector import KeyframeScheduler, NoiseFloorDetector, nearest_grid_index
 from freqscan.streaming.kafka_publisher import KafkaSignalPublisher
 
 
@@ -33,6 +33,7 @@ class HackRFBackend(SDRBackend):
         partitions: list[int] | None = None,
         canonical_freqs: list[np.ndarray] | None = None,
         csv_writers: list[CsvSweepWriter] | None = None,
+        keyframes: list[KeyframeScheduler] | None = None,
     ):
         super().__init__()
         self.settings = settings
@@ -43,6 +44,7 @@ class HackRFBackend(SDRBackend):
         self._partitions = partitions
         self._canonical_freqs = canonical_freqs
         self._csv_writers = csv_writers
+        self._keyframes = keyframes
 
     def _range_index_for(self, hz_low: float) -> int | None:
         mhz = hz_low / 1e6
@@ -106,6 +108,11 @@ class HackRFBackend(SDRBackend):
                 flagged_mask = detector.flag_hop(indices, powers_arr)
                 flagged = list(zip(freqs_arr[flagged_mask].tolist(), powers_arr[flagged_mask].tolist()))
                 self._publisher.publish(channel.label, flagged, partition=partition)
+                keyframe = self._keyframes[idx] if self._keyframes is not None else None
+                if keyframe is not None and keyframe.due():
+                    all_bins = list(zip(freqs_arr.tolist(), powers_arr.tolist()))
+                    self._publisher.publish(channel.label, all_bins, partition=partition)
+                    keyframe.mark_sent()
 
         self._proc.wait()
         if self._proc.returncode > 0:

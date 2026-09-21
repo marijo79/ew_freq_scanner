@@ -188,6 +188,27 @@ def test_build_backend_kafka_enabled_builds_per_device_margins(monkeypatch):
     assert backend._partitions == [0, 1]
 
 
+def test_build_backend_kafka_disabled_keyframe_interval_builds_no_op_schedulers(monkeypatch):
+    monkeypatch.setattr("freqscan.sdr.build_producer", lambda kafka: _FakeProducer())
+
+    kafka = KafkaSettings(enabled=True, bootstrap_servers="broker:9098", keyframe_interval_s=5.0)
+    settings = Settings(_env_file=None, rtl=_RTL, hackrf=None, kafka=kafka)
+    backend = build_backend(settings)
+
+    assert len(backend._keyframes) == 1
+    assert backend._keyframes[0].due(now=0.0) is True  # due immediately, per KeyframeScheduler's own contract
+
+
+def test_build_backend_without_keyframe_interval_schedulers_stay_disabled(monkeypatch):
+    monkeypatch.setattr("freqscan.sdr.build_producer", lambda kafka: _FakeProducer())
+
+    kafka = KafkaSettings(enabled=True, bootstrap_servers="broker:9098")  # keyframe_interval_s defaults to None
+    settings = Settings(_env_file=None, rtl=_RTL, hackrf=None, kafka=kafka)
+    backend = build_backend(settings)
+
+    assert backend._keyframes[0].due(now=0.0) is False
+
+
 def test_build_backend_kafka_enabled_builds_per_device_spatial_margins(monkeypatch):
     monkeypatch.setattr("freqscan.sdr.build_producer", lambda kafka: _FakeProducer())
 

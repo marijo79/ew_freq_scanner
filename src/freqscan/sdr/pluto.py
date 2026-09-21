@@ -10,7 +10,7 @@ from freqscan.config import PlutoChannelConfig, PlutoSettings
 from freqscan.csv_writer import CsvSweepWriter
 from freqscan.parsing import parse_sweep_line
 from freqscan.sdr.base import Channel, SDRBackend, SweepState
-from freqscan.streaming.detector import NoiseFloorDetector, nearest_grid_index
+from freqscan.streaming.detector import KeyframeScheduler, NoiseFloorDetector, nearest_grid_index
 from freqscan.streaming.kafka_publisher import KafkaSignalPublisher
 
 _SWEEP_SCRIPT = Path(__file__).resolve().parent.parent.parent.parent / "scripts" / "pluto_sweep.py"
@@ -55,6 +55,7 @@ class PlutoBackend(SDRBackend):
         partitions: list[int] | None = None,
         canonical_freqs: list[np.ndarray] | None = None,
         csv_writers: list[CsvSweepWriter] | None = None,
+        keyframes: list[KeyframeScheduler] | None = None,
     ):
         super().__init__()
         self.settings = settings
@@ -66,6 +67,7 @@ class PlutoBackend(SDRBackend):
         self._partitions = partitions
         self._canonical_freqs = canonical_freqs
         self._csv_writers = csv_writers
+        self._keyframes = keyframes
 
     def _range_index_for(self, hz_low: float) -> int | None:
         mhz = hz_low / 1e6
@@ -87,6 +89,7 @@ class PlutoBackend(SDRBackend):
                     self._partitions[lo:hi] if self._partitions is not None else None,
                     self._canonical_freqs[lo:hi] if self._canonical_freqs is not None else None,
                     self._csv_writers[lo:hi] if self._csv_writers is not None else None,
+                    self._keyframes[lo:hi] if self._keyframes is not None else None,
                 ),
                 daemon=True,
             ).start()
@@ -99,6 +102,7 @@ class PlutoBackend(SDRBackend):
         partitions: list[int] | None,
         canonical_freqs: list[np.ndarray] | None,
         csv_writers: list[CsvSweepWriter] | None,
+        keyframes: list[KeyframeScheduler] | None = None,
     ) -> None:
         range_args = []
         for r in self.settings.ranges:
@@ -161,6 +165,11 @@ class PlutoBackend(SDRBackend):
                 flagged_mask = detector.flag_hop(indices, powers_arr)
                 flagged = list(zip(freqs_arr[flagged_mask].tolist(), powers_arr[flagged_mask].tolist()))
                 self._publisher.publish(channel.label, flagged, partition=partition)
+                keyframe = keyframes[idx] if keyframes is not None else None
+                if keyframe is not None and keyframe.due():
+                    all_bins = list(zip(freqs_arr.tolist(), powers_arr.tolist()))
+                    self._publisher.publish(channel.label, all_bins, partition=partition)
+                    keyframe.mark_sent()
 
         proc.wait()
         if proc.returncode > 0:
