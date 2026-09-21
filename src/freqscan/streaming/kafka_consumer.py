@@ -8,24 +8,25 @@ from confluent_kafka import OFFSET_BEGINNING, OFFSET_END, Consumer, KafkaError, 
 
 from freqscan.config import KafkaViewerSettings
 from freqscan.sdr.base import Channel, SDRBackend, SweepState
-from freqscan.streaming.detector import nearest_grid_index
 from freqscan.streaming.kafka_publisher import build_client_config
 
 METADATA_TIMEOUT = 10.0  # seconds to wait for every channel's metadata before giving up
 
 
 def apply_message(channel: Channel, payload: dict, canonical_freqs: np.ndarray) -> None:
-    """Merge one decoded message's bins into channel, snapping each bin's freq_hz to the
-    nearest canonical grid frequency (from metadata). Snapping — instead of using freq_hz
-    as the dict key directly — matters because the producer's actual bin centers (as
-    parsed from rtl_power/hackrf_sweep output) and a grid computed from nominal config
-    values can differ by sub-bin amounts; without snapping, that mismatch would silently
-    grow state.sweep with extra near-duplicate keys, reintroducing the exact "known bin
-    count keeps changing" problem the metadata grid was built to avoid."""
+    """Merge one decoded message's bins into channel. payload's bin_index_deltas are
+    delta-encoded grid indices (see kafka_publisher.build_payload() for why) -- a
+    running cumulative sum recovers each bin's absolute index into canonical_freqs
+    directly. Unlike the old freq_hz-keyed wire format, no snapping/nearest-neighbor
+    lookup is needed here at all: the producer already computed the exact canonical
+    index before publishing (nearest_grid_index(), applied once, producer-side, against
+    real hardware bin centers that can differ from the nominal grid by sub-bin amounts),
+    so the index arriving over the wire is already exact."""
     with channel.state.lock:
-        for b in payload["bins"]:
-            idx = nearest_grid_index(canonical_freqs, b["freq_hz"])
-            channel.state.sweep[canonical_freqs[idx]] = b["power_dbm"]
+        index = 0
+        for delta, power_dbm in zip(payload["bin_index_deltas"], payload["power_dbm"]):
+            index += delta
+            channel.state.sweep[canonical_freqs[index]] = power_dbm
 
 
 def build_consumer(settings: KafkaViewerSettings) -> Consumer:

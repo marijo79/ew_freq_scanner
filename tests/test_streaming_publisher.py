@@ -43,8 +43,8 @@ class _FakeProducer:
 def test_publish_tracks_offsets_per_partition():
     publisher = KafkaSignalPublisher(_FakeProducer(), "freqscan.signals", "freqscan.signals.metadata")
 
-    publisher.publish("RTL: Dev0 80-120 MHz", bins=[(100_000_000.0, -42.0)])
-    publisher.publish("RTL: Dev0 80-120 MHz", bins=[(100_010_000.0, -38.5)])
+    publisher.publish("RTL: Dev0 80-120 MHz", bins=[(100, -42.0)])
+    publisher.publish("RTL: Dev0 80-120 MHz", bins=[(101, -38.5)])
 
     assert publisher.offsets() == {0: 1}
 
@@ -55,7 +55,7 @@ def test_publish_calls_caller_on_delivery_alongside_offset_tracking():
 
     publisher.publish(
         "HackRF: 850-950 MHz",
-        bins=[(900_000_000.0, -50.0)],
+        bins=[(200, -50.0)],
         on_delivery=lambda err, msg: received.append(msg),
     )
 
@@ -66,9 +66,9 @@ def test_publish_calls_caller_on_delivery_alongside_offset_tracking():
 def test_publish_with_explicit_partition_routes_independently():
     publisher = KafkaSignalPublisher(_FakeProducer(), "freqscan.signals", "freqscan.signals.metadata")
 
-    publisher.publish("HackRF: 850-950 MHz", bins=[(900_000_000.0, -50.0)], partition=2)
-    publisher.publish("HackRF: 2300-2500 MHz", bins=[(2_400_000_000.0, -60.0)], partition=5)
-    publisher.publish("HackRF: 850-950 MHz", bins=[(900_010_000.0, -49.0)], partition=2)
+    publisher.publish("HackRF: 850-950 MHz", bins=[(200, -50.0)], partition=2)
+    publisher.publish("HackRF: 2300-2500 MHz", bins=[(9000, -60.0)], partition=5)
+    publisher.publish("HackRF: 850-950 MHz", bins=[(201, -49.0)], partition=2)
 
     assert publisher.offsets() == {2: 1, 5: 0}
 
@@ -115,24 +115,32 @@ def test_publish_metadata_sends_to_metadata_topic_on_given_partition():
 
 
 def test_build_payload_shape():
+    # index 100 then 101 -- consecutive, so the second delta is 1.
     payload = build_payload(
         channel_label="RTL: Dev0 80-120 MHz",
-        bins=[(100_000_000.0, -42.0), (100_010_000.0, -38.5)],
+        bins=[(100, -42.0), (101, -38.5)],
         timestamp=1234.5,
     )
     assert payload == {
         "channel": "RTL: Dev0 80-120 MHz",
         "timestamp": 1234.5,
-        "bins": [
-            {"freq_hz": 100_000_000.0, "power_dbm": -42.0},
-            {"freq_hz": 100_010_000.0, "power_dbm": -38.5},
-        ],
+        "bin_index_deltas": [100, 1],
+        "power_dbm": [-42.0, -38.5],
     }
+
+
+def test_build_payload_delta_encodes_non_consecutive_indices():
+    # first delta is the absolute index (500); then a gap of 3 (503-500); then
+    # another gap of 2 (505-503).
+    payload = build_payload(channel_label="HackRF: 850-950 MHz", bins=[(500, -60.0), (503, -55.0), (505, -50.0)], timestamp=1.0)
+    assert payload["bin_index_deltas"] == [500, 3, 2]
+    assert payload["power_dbm"] == [-60.0, -55.0, -50.0]
 
 
 def test_build_payload_empty_bins():
     payload = build_payload(channel_label="HackRF: 850-950 MHz", bins=[], timestamp=1.0)
-    assert payload["bins"] == []
+    assert payload["bin_index_deltas"] == []
+    assert payload["power_dbm"] == []
 
 
 @dataclass

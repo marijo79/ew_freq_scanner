@@ -35,12 +35,14 @@ def nearest_grid_index(canonical_freqs: np.ndarray, freq_hz):
     """Index (or array of indices, matching freq_hz's shape) of the canonical grid
     frequency closest to freq_hz. canonical_freqs must be sorted ascending.
 
-    Used both by the producer (snapping a hop's real, possibly slightly-off-grid bin
-    centers onto a channel's fixed n_bins grid before updating detector state) and by
-    the Kafka viewer (same snapping, for the same reason: the producer's actual bin
-    centers and a grid computed from nominal config values can differ by sub-bin
-    amounts, and without snapping that mismatch would silently create extra columns).
-    """
+    Used by each backend's producer thread to snap a hop's real, possibly
+    slightly-off-grid bin centers onto the channel's fixed n_bins grid, both for
+    updating detector state and for what actually gets published to Kafka (as this
+    exact index, delta-encoded -- see kafka_publisher.build_payload()). The Kafka
+    viewer's own consumer side (kafka_consumer.apply_message()) no longer needs this at
+    all: since the wire format carries the exact index rather than freq_hz, there's
+    nothing left to snap on the consuming end -- a byproduct of the switch away from
+    freq_hz-keyed messages, not just a size optimization."""
     n = len(canonical_freqs)
     freq_hz = np.asarray(freq_hz)
     idx = np.searchsorted(canonical_freqs, freq_hz)

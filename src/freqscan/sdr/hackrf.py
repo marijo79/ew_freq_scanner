@@ -106,11 +106,11 @@ class HackRFBackend(SDRBackend):
                 powers_arr = np.asarray(powers)
                 indices = nearest_grid_index(self._canonical_freqs[idx], freqs_arr)
                 flagged_mask = detector.flag_hop(indices, powers_arr)
-                flagged = list(zip(freqs_arr[flagged_mask].tolist(), powers_arr[flagged_mask].tolist()))
+                flagged = list(zip(indices[flagged_mask].tolist(), powers_arr[flagged_mask].tolist()))
                 self._publisher.publish(channel.label, flagged, partition=partition)
                 keyframe = self._keyframes[idx] if self._keyframes is not None else None
                 if keyframe is not None and keyframe.due():
-                    all_bins = list(zip(freqs_arr.tolist(), powers_arr.tolist()))
+                    all_bins = list(zip(indices.tolist(), powers_arr.tolist()))
                     self._publisher.publish(channel.label, all_bins, partition=partition)
                     keyframe.mark_sent()
 

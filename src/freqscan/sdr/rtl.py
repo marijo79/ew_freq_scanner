@@ -126,10 +126,10 @@ class RTLBackend(SDRBackend):
                 # computed from nominal config can differ by sub-bin amounts.
                 indices = nearest_grid_index(canonical_freqs, freqs_arr)
                 flagged_mask = detector.flag_hop(indices, powers_arr)
-                flagged = list(zip(freqs_arr[flagged_mask].tolist(), powers_arr[flagged_mask].tolist()))
+                flagged = list(zip(indices[flagged_mask].tolist(), powers_arr[flagged_mask].tolist()))
                 self._publisher.publish(channel.label, flagged, partition=partition)
                 if keyframe is not None and keyframe.due():
-                    all_bins = list(zip(freqs_arr.tolist(), powers_arr.tolist()))
+                    all_bins = list(zip(indices.tolist(), powers_arr.tolist()))
                     self._publisher.publish(channel.label, all_bins, partition=partition)
                     keyframe.mark_sent()
 

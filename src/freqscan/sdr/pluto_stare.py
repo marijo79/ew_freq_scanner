@@ -158,10 +158,10 @@ class PlutoStareBackend(SDRBackend):
             if detector is not None:
                 indices = nearest_grid_index(canonical_freqs_arr, freqs)
                 flagged_mask = detector.flag_hop(indices, powers)
-                flagged = list(zip(freqs[flagged_mask].tolist(), powers[flagged_mask].tolist()))
+                flagged = list(zip(indices[flagged_mask].tolist(), powers[flagged_mask].tolist()))
                 self._publisher.publish(channel.label, flagged, partition=partition)
                 if keyframe is not None and keyframe.due():
-                    all_bins = list(zip(freqs.tolist(), powers.tolist()))
+                    all_bins = list(zip(indices.tolist(), powers.tolist()))
                     self._publisher.publish(channel.label, all_bins, partition=partition)
                     keyframe.mark_sent()
 

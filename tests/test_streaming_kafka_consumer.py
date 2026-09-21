@@ -3,7 +3,8 @@ from collections import deque
 import numpy as np
 
 from freqscan.sdr.base import Channel, SweepState
-from freqscan.streaming.kafka_consumer import apply_message, nearest_grid_index
+from freqscan.streaming.detector import nearest_grid_index
+from freqscan.streaming.kafka_consumer import apply_message
 
 
 def _make_channel(grid: np.ndarray) -> Channel:
@@ -35,30 +36,26 @@ def test_nearest_grid_index_clamps_outside_range():
     assert nearest_grid_index(grid, 999.0) == 2
 
 
-def test_apply_message_snaps_to_nearest_canonical_freq():
+def test_apply_message_uses_exact_index_no_snapping_needed():
     grid = np.array([900_000_000.0, 900_020_000.0, 900_040_000.0])
     channel = _make_channel(grid)
 
-    # Producer's actual reading is a few Hz off the nominal grid value (real rtl_power/
-    # hackrf_sweep bins don't always land exactly on a config-derived lattice) — it must
-    # still land on the existing grid key, not create a new one.
-    payload = {"bins": [{"freq_hz": 900_000_003.0, "power_dbm": -50.0}]}
+    # bin_index_deltas[0] is the absolute index (delta from an implicit 0) -- index 0
+    # here means the producer's own nearest_grid_index() already resolved this bin to
+    # the grid's first entry, so there's nothing left for the consumer to snap.
+    payload = {"bin_index_deltas": [0], "power_dbm": [-50.0]}
     apply_message(channel, payload, grid)
 
     assert channel.state.sweep[900_000_000.0] == -50.0
     assert len(channel.state.sweep) == 3  # no new key was added
 
 
-def test_apply_message_merges_multiple_bins_in_one_call():
+def test_apply_message_merges_multiple_bins_via_cumulative_deltas():
     grid = np.array([900_000_000.0, 900_020_000.0, 900_040_000.0])
     channel = _make_channel(grid)
 
-    payload = {
-        "bins": [
-            {"freq_hz": 900_000_000.0, "power_dbm": -50.0},
-            {"freq_hz": 900_040_000.0, "power_dbm": -40.0},
-        ]
-    }
+    # index 0 (delta 0), then index 0+2=2 -- skipping the middle bin entirely.
+    payload = {"bin_index_deltas": [0, 2], "power_dbm": [-50.0, -40.0]}
     apply_message(channel, payload, grid)
 
     assert channel.state.sweep[900_000_000.0] == -50.0
@@ -66,12 +63,25 @@ def test_apply_message_merges_multiple_bins_in_one_call():
     assert np.isnan(channel.state.sweep[900_020_000.0])  # untouched bin stays NaN
 
 
+def test_apply_message_consecutive_deltas_of_one_advance_index_by_one():
+    grid = np.array([900_000_000.0, 900_020_000.0, 900_040_000.0])
+    channel = _make_channel(grid)
+
+    # The common keyframe case: a long contiguous run, every delta after the first is 1.
+    payload = {"bin_index_deltas": [0, 1, 1], "power_dbm": [-50.0, -45.0, -40.0]}
+    apply_message(channel, payload, grid)
+
+    assert channel.state.sweep[900_000_000.0] == -50.0
+    assert channel.state.sweep[900_020_000.0] == -45.0
+    assert channel.state.sweep[900_040_000.0] == -40.0
+
+
 def test_apply_message_overwrites_existing_value_on_later_call():
     grid = np.array([900_000_000.0, 900_020_000.0])
     channel = _make_channel(grid)
 
-    apply_message(channel, {"bins": [{"freq_hz": 900_000_000.0, "power_dbm": -30.0}]}, grid)
-    apply_message(channel, {"bins": [{"freq_hz": 900_000_000.0, "power_dbm": -20.0}]}, grid)
+    apply_message(channel, {"bin_index_deltas": [0], "power_dbm": [-30.0]}, grid)
+    apply_message(channel, {"bin_index_deltas": [0], "power_dbm": [-20.0]}, grid)
 
     assert channel.state.sweep[900_000_000.0] == -20.0
     assert len(channel.state.sweep) == 2

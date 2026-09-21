@@ -107,6 +107,15 @@ class KafkaSettings(BaseModel):
     metadata_topic: str = "freqscan.signals.metadata"
     region: str = "eu-central-1"
     baseline_window: int = 50  # readings per bin kept for the rolling noise-floor baseline
+    # compression_type: producer-only Kafka client compression codec ("none", "gzip",
+    # "snappy", "lz4", "zstd") — fully transparent to any consumer (librdkafka
+    # decompresses automatically from the record batch header, no viewer-side config
+    # needed). "gzip" chosen 2026-09-21 after measuring real captured messages: combined
+    # with the bin-index-delta payload encoding below, gzip got messages down to ~10% of
+    # the original freq_hz-based JSON — matching or slightly beating an equivalent
+    # protobuf encoding, so protobuf wasn't adopted (a new dependency/schema-migration
+    # cost for no measured benefit over "compress the existing JSON smarter").
+    compression_type: str = "gzip"
     # keyframe_interval_s: how often (seconds) each channel also publishes a full
     # keyframe — every bin of its current hop, not just the ones flag_hop() flagged.
     # None (default) disables this entirely, matching the original design where the
