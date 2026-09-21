@@ -82,7 +82,6 @@ def run(backend: SDRBackend, waterfall_rows: int, refresh_ms: int = 200) -> None
 
     curves = []
     images = []
-    image_rects = []
     wf_levels = []
 
     for col, channel in enumerate(backend.channels):
@@ -133,7 +132,6 @@ def run(backend: SDRBackend, waterfall_rows: int, refresh_ms: int = 200) -> None
         img = pg.ImageItem()
         p_wf.addItem(img)
         images.append(img)
-        image_rects.append(QtCore.QRectF(freq_lo, 0, freq_hi - freq_lo, waterfall_rows))
         # Color range fixed once, anchored to the actual noise floor -- see
         # initial_waterfall_clim()'s docstring and matplotlib_backend.py's matching
         # comment for why this differs from the spectrum panel's own initial_ylim().
@@ -142,14 +140,28 @@ def run(backend: SDRBackend, waterfall_rows: int, refresh_ms: int = 200) -> None
         _add_freq_hint(p_wf)
 
     def update():
-        for channel, curve, img, rect, levels in zip(
-            backend.channels, curves, images, image_rects, wf_levels
-        ):
+        for channel, curve, img, levels in zip(backend.channels, curves, images, wf_levels):
             snap = channel_snapshot(channel, waterfall_rows)
             if snap is None:
                 continue
             mhz, powers, mat = snap
             curve.setData(mhz, powers)
+            # rect derived from mhz's own real bounds every frame -- NOT the fixed
+            # initial_freq_extent() view range computed once at setup above. Those two
+            # can genuinely differ: mat's actual column span always matches
+            # channel.state.sweep's full current key set (channel_snapshot()'s own
+            # `sorted(state.sweep)`), which is the wide declared grid, mostly NaN, for
+            # a KafkaConsumerBackend channel, but only the narrow real range for a
+            # local PlutoStareBackend channel (see initial_freq_extent()'s docstring for
+            # why those two cases differ). A rect that doesn't match mat's true span
+            # stretches/squeezes the whole image into the wrong width -- found live
+            # 2026-09-21 right after narrowing initial_freq_extent() to fix a separate
+            # dead-margin bug: fixing the view's x-range alone, without also keeping
+            # this rect in sync with the image's actual data width, made the waterfall
+            # visibly narrower than the spectrum line above it and misaligned with it.
+            # Deriving the rect from this same frame's own mhz keeps it correct for
+            # every backend uniformly, with no separate assumption to maintain at all.
+            rect = QtCore.QRectF(mhz[0], 0, mhz[-1] - mhz[0], waterfall_rows)
             # pyqtgraph's ImageItem expects (x, y) axis order -- opposite of mat's own
             # (row=time, col=frequency) numpy convention -- hence the transpose. mat's
             # row 0 is already the newest (see channel_snapshot()); with the rect's y=0

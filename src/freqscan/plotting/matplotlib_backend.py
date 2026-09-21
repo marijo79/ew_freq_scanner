@@ -39,6 +39,21 @@ def update_channel(channel, line, fill, wf_img, waterfall_rows: int, ybase: floa
     fill.set_verts([verts])
 
     wf_img.set_data(mat)
+    # extent derived from mhz's own real bounds every frame -- NOT the fixed
+    # initial_freq_extent() view range set once at setup. Those two can genuinely
+    # differ: mat's actual column span always matches channel.state.sweep's full
+    # current key set (channel_snapshot()'s own `sorted(state.sweep)`), which is the
+    # wide declared grid, mostly NaN, for a KafkaConsumerBackend channel, but only the
+    # narrow real range for a local PlutoStareBackend channel (see
+    # initial_freq_extent()'s docstring for why those two cases differ). An extent that
+    # doesn't match mat's true span stretches/squeezes the whole image into the wrong
+    # width -- found live 2026-09-21 right after narrowing initial_freq_extent() to fix
+    # a separate dead-margin bug: fixing the view's xlim alone, without also keeping
+    # this extent in sync with the image's actual data width, made the waterfall
+    # visibly narrower than the spectrum line above it and misaligned with it. See
+    # pyqtgraph_backend.py's matching fix/comment -- same root cause, same fix, applied
+    # to imshow()'s set_extent() instead of ImageItem's rect= kwarg.
+    wf_img.set_extent([mhz[0], mhz[-1], waterfall_rows, 0])
 
     return [line, fill, wf_img]
 
