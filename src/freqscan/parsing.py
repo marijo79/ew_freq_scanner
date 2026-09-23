@@ -29,6 +29,37 @@ def parse_sweep_line(raw: str) -> SweepLine | None:
     return SweepLine(hz_low=hz_low, hz_step=hz_step, powers=powers)
 
 
+def suppress_dc_spike(powers: list[float], width: int = 1) -> list[float]:
+    """Null out the AD9361's own LO self-mixing/DC-offset spike, which lands exactly at
+    the center bin of every hop's capture on a direct-conversion (zero-IF) receiver like
+    the AD9361 -- a hardware artifact, not real RF. Replaces the center `2*width+1` bins
+    with a linear interpolation between their immediate flanking bins.
+
+    Confirmed live 2026-09-23: measured real peak frequencies across a 150MHz Pluto
+    sweep landed in an exact 16MHz comb (retained_step = capture_bandwidth * (1 -
+    2*edge_trim)), one spike per hop at that hop's own tuned LO frequency -- too regular
+    to be real RF, and unaffected by edge_trim since the spike sits at the capture's
+    center, nowhere near either edge trim_edges() crops.
+
+    Operates on a hop's full, untrimmed power array (same index space as trim_edges()
+    consumes) -- call this before trim_edges(), not after, since the center index here
+    (n // 2, matching np.fft.fftshift's placement of the zero-frequency bin) is only
+    meaningful pre-trim.
+    """
+    n = len(powers)
+    center = n // 2
+    lo = max(0, center - width - 1)
+    hi = min(n - 1, center + width + 1)
+    result = list(powers)
+    if hi <= lo:
+        return result
+    left, right = powers[lo], powers[hi]
+    span = hi - lo
+    for i in range(lo + 1, hi):
+        result[i] = left + (right - left) * (i - lo) / span
+    return result
+
+
 def trim_edges(
     hz_low: float, hz_step: float, powers: list[float], edge_trim: float
 ) -> tuple[list[float], list[float]]:

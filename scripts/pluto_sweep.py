@@ -18,6 +18,16 @@ range's own edge-trim fraction off both edges (via `freqscan.parsing.trim_edges(
 before printing, so adjacent hops tile without gaps despite the AD9361's anti-aliasing
 filter roll-off at the edges of every capture.
 
+Before that edge trim, each hop's raw spectrum also goes through
+`freqscan.parsing.suppress_dc_spike()` -- the AD9361 is a direct-conversion (zero-IF)
+receiver, so its own LO leaks into the RX path and self-mixes down to exactly 0 Hz
+baseband, landing a spurious high-power spike at the *center* bin of every capture (that
+hop's own tuned LO frequency) -- nowhere near either edge trim_edges() crops. Confirmed
+live 2026-09-23: swept 5725-5875MHz and measured the resulting "signal" peaks landing in
+an exact 16MHz comb (one per hop, spaced by `retained_step`) -- too metronomically regular
+to be real RF, and it showed up in every configured range, just most visibly in the widest
+one (most hops = most comb teeth).
+
 `--channel {1,2}` picks which AD9361 RX chain to capture -- RX1 (`voltage0`/`voltage1`) or
 RX2 (`voltage2`/`voltage3`) on the `cf-ad9361-lpc` device. Both physically share the same
 RX_LO/sampling_frequency/rf_bandwidth (one shared local oscillator and ADC clock domain
@@ -43,7 +53,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from freqscan.parsing import trim_edges  # noqa: E402
+from freqscan.parsing import suppress_dc_spike, trim_edges  # noqa: E402
 
 PLUTO_MAX_BANDWIDTH_HZ = 56_000_000
 
@@ -184,7 +194,7 @@ def sweep_range(
         power_db = 20 * np.log10(np.abs(spectrum) / n_bins + 1e-12)
 
         hz_low = lo - capture_bw / 2
-        freqs, trimmed = trim_edges(hz_low, hz_step, list(power_db), r.edge_trim)
+        freqs, trimmed = trim_edges(hz_low, hz_step, suppress_dc_spike(list(power_db)), r.edge_trim)
 
         now = datetime.datetime.now()
         hz_high = freqs[-1] + hz_step

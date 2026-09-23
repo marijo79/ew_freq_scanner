@@ -1,4 +1,4 @@
-from freqscan.parsing import parse_sweep_line, trim_edges
+from freqscan.parsing import parse_sweep_line, suppress_dc_spike, trim_edges
 
 
 def _line(powers):
@@ -43,3 +43,29 @@ def test_trim_edges_minimum_trim_boundary():
     freqs, trimmed = trim_edges(hz_low=10.0, hz_step=2.0, powers=powers, edge_trim=0.05)
     assert trimmed == [2.0, 3.0]
     assert freqs == [12.0, 14.0]
+
+
+def test_suppress_dc_spike_default_width_replaces_three_center_bins():
+    # n=7, center index = 3. width=1 replaces indices 2,3,4 via linear interpolation
+    # between the flanking bins (index 1 and 5), discarding the spike at index 3.
+    powers = [0.0, 1.0, 2.0, 999.0, 4.0, 5.0, 6.0]
+    result = suppress_dc_spike(powers)
+    assert result == [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+
+
+def test_suppress_dc_spike_width_zero_replaces_only_center_bin():
+    powers = [1.0, 2.0, 999.0, 4.0, 5.0]
+    result = suppress_dc_spike(powers, width=0)
+    assert result == [1.0, 2.0, 3.0, 4.0, 5.0]
+
+
+def test_suppress_dc_spike_does_not_mutate_input():
+    powers = [1.0, 2.0, 999.0, 4.0, 5.0]
+    suppress_dc_spike(powers, width=0)
+    assert powers == [1.0, 2.0, 999.0, 4.0, 5.0]
+
+
+def test_suppress_dc_spike_tiny_array_is_a_no_op_not_a_crash():
+    assert suppress_dc_spike([], width=1) == []
+    assert suppress_dc_spike([5.0], width=1) == [5.0]
+    assert suppress_dc_spike([5.0, 6.0], width=1) == [5.0, 6.0]

@@ -7,7 +7,7 @@ PLOT_BACKEND=matplotlib
 PLOT_REFRESH_MS=200
 
 # ---- PlutoSDR-compatible settings ----
-PLUTO__URI=ip:192.168.2.1
+PLUTO__URI=ip:192.168.5.15
 PLUTO__CHANNELS=[{"channel":1}]
 # bin_width: FFT bin width (frequency resolution) in Hz, shared by every range below.
 PLUTO__BIN_WIDTH=25000

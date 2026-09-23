@@ -19,6 +19,15 @@ Still drops `--edge-trim` fraction of bins from each edge (via
 only one fixed window here, nothing to tile), but because the AD9361's anti-aliasing
 filter still rolls off at the edges of any capture and those bins are still unreliable.
 
+Also runs `freqscan.parsing.suppress_dc_spike()` on each window's raw spectrum before that
+edge trim -- the AD9361's own LO leaks into its RX path and self-mixes down to exactly
+0 Hz baseband on this direct-conversion (zero-IF) chip, landing a spurious high-power
+spike at the *center* bin of every capture (here, exactly `frequency`) -- nowhere near
+either edge `trim_edges()` crops, and otherwise indistinguishable from a real, very
+strong, always-on carrier sitting right on the tuned frequency. See
+scripts/pluto_sweep.py's module docstring for how this was found and confirmed (a
+16MHz-spaced comb measured across a live sweep, too regular to be real RF).
+
 `--channel-configs` is a JSON list (same shape as `PLUTO_STARE__CHANNELS` in `.env`,
 e.g. `[{"channel":1,"gain_control_mode":"manual","hardwaregain":30.0}, {"channel":2,...}]`)
 naming every RX chain to capture -- RX1 (`voltage0`/`voltage1`) and/or RX2
@@ -59,7 +68,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from freqscan.parsing import trim_edges  # noqa: E402
+from freqscan.parsing import suppress_dc_spike, trim_edges  # noqa: E402
 
 PLUTO_MAX_BANDWIDTH_HZ = 56_000_000
 
@@ -186,7 +195,7 @@ def stare(
 
                 spectrum = np.fft.fftshift(np.fft.fft(iq * window))
                 power_db = 20 * np.log10(np.abs(spectrum) / n_bins + 1e-12)
-                freqs, trimmed = trim_edges(hz_low, hz_step, list(power_db), edge_trim)
+                freqs, trimmed = trim_edges(hz_low, hz_step, suppress_dc_spike(list(power_db)), edge_trim)
 
                 hz_high = freqs[-1] + hz_step
                 powers_str = ", ".join(f"{p:.2f}" for p in trimmed)
