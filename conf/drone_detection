@@ -1,0 +1,24 @@
+# PlutoSDR sweep profile: drone detection, EU ISM allocations.
+#   863-870 MHz : EU SRD860/868 band — long-range control links (TBS Crossfire,
+#                 ExpressLRS, FrSky R9, some DJI OcuSync variants)
+#   2400-2483.5 MHz : 2.4GHz ISM — primary control+telemetry for most consumer
+#                 drones (DJI OcuSync/Lightbridge, WiFi-based FPV), BLE Remote ID
+#   5725-5875 MHz : 5.8GHz ISM — dominant FPV video downlink band, part of DJI
+#                 OcuSync's 5.8GHz range
+# Run with: python -m freqscan --plot --config conf/drone_detection
+
+# ---- Shared ----
+WATERFALL_ROWS=100
+PLOT_BACKEND=matplotlib
+PLOT_REFRESH_MS=200
+
+# ---- PlutoSDR-compatible settings ----
+PLUTO__URI=ip:192.168.2.1
+PLUTO__CHANNELS=[{"channel":1}]
+# bin_width: FFT bin width (frequency resolution) in Hz, shared by every range below.
+PLUTO__BIN_WIDTH=25000
+# capture_bandwidth: per-hop instantaneous RX bandwidth in Hz (Pluto/AD9361 hardware max
+# ~56MHz) — each range below is swept in capture_bandwidth-sized hops regardless of its
+# own width.
+PLUTO__CAPTURE_BANDWIDTH=20000000
+PLUTO__RANGES=[{"freq_start":863,"freq_stop":870,"edge_trim":0.1},{"freq_start":2400,"freq_stop":2483.5,"edge_trim":0.1},{"freq_start":5725,"freq_stop":5875,"edge_trim":0.1}]

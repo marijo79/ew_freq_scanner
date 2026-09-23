@@ -5,6 +5,21 @@ import pytest
 from freqscan.config import KafkaViewerSettings, PlutoChannelConfig, Settings
 
 
+def test_settings_loads_from_custom_env_file_path(tmp_path, monkeypatch):
+    monkeypatch.delenv("RTL__DEVICES", raising=False)
+    config_file = tmp_path / "conf" / "pluto_3_ranges"
+    config_file.parent.mkdir()
+    config_file.write_text(
+        'HACKRF__BIN_WIDTH=20000\nHACKRF__RANGES=[{"freq_start": 850, "freq_stop": 950}]\n'
+    )
+
+    settings = Settings(_env_file=config_file)
+
+    assert settings.hackrf is not None
+    assert settings.hackrf.bin_width == 20000
+    assert settings.rtl is None
+
+
 def test_rtl_settings_load_from_env(monkeypatch):
     monkeypatch.setenv("RTL__GAIN", "50")
     monkeypatch.setenv(

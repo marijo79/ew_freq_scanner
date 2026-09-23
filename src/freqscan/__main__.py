@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 import time
 
@@ -33,6 +34,12 @@ def parse_args() -> argparse.Namespace:
             "(created if missing)"
         ),
     )
+    parser.add_argument(
+        "--config",
+        metavar="FILE",
+        default=None,
+        help="path to a .env-style config file to load instead of the default ./.env (e.g. conf/pluto_3_ranges)",
+    )
     args = parser.parse_args()
     if not args.plot and not args.kafka_publisher and not args.csv:
         parser.error("at least one of --plot, --kafka_publisher, or --csv must be given")
@@ -57,7 +64,10 @@ def run_headless(backend: SDRBackend) -> None:
 
 def main() -> None:
     args = parse_args()
-    settings = Settings()
+    if args.config is not None and not os.path.isfile(args.config):
+        print(f"freqscan: --config file not found: {args.config}", file=sys.stderr)
+        sys.exit(1)
+    settings = Settings(_env_file=args.config) if args.config is not None else Settings()
     if not args.kafka_publisher:
         settings.kafka = None
     elif settings.kafka is None:

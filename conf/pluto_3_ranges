@@ -1,0 +1,18 @@
+# PlutoSDR sweep profile: 3 ranges (UHF, GSM900, 2.4GHz ISM/WiFi/BT).
+# Run with: python -m freqscan --plot --config conf/pluto_3_ranges
+
+# ---- Shared ----
+WATERFALL_ROWS=100
+PLOT_BACKEND=matplotlib
+PLOT_REFRESH_MS=200
+
+# ---- PlutoSDR-compatible settings ----
+PLUTO__URI=ip:192.168.2.1
+PLUTO__CHANNELS=[{"channel":1}]
+# bin_width: FFT bin width (frequency resolution) in Hz, shared by every range below.
+PLUTO__BIN_WIDTH=25000
+# capture_bandwidth: per-hop instantaneous RX bandwidth in Hz (Pluto/AD9361 hardware max
+# ~56MHz) — each range below is swept in capture_bandwidth-sized hops regardless of its
+# own width.
+PLUTO__CAPTURE_BANDWIDTH=20000000
+PLUTO__RANGES=[{"freq_start":420,"freq_stop":470,"edge_trim":0.1},{"freq_start":850,"freq_stop":900,"edge_trim":0.1},{"freq_start":2400,"freq_stop":2500,"edge_trim":0.1}]

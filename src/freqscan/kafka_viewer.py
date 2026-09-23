@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 
 from freqscan.config import KafkaViewerSettings
@@ -22,12 +23,21 @@ def parse_args() -> argparse.Namespace:
         default="matplotlib",
         help="which plotting/*_backend.py implementation renders the window (default: matplotlib)",
     )
+    parser.add_argument(
+        "--config",
+        metavar="FILE",
+        default=None,
+        help="path to a .env-style config file to load instead of the default ./.env (e.g. conf/pluto_3_ranges)",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    settings = KafkaViewerSettings()
+    if args.config is not None and not os.path.isfile(args.config):
+        print(f"freqscan-viewer: --config file not found: {args.config}", file=sys.stderr)
+        sys.exit(1)
+    settings = KafkaViewerSettings(_env_file=args.config) if args.config is not None else KafkaViewerSettings()
     backend = KafkaConsumerBackend(settings, args.waterfall_rows)
     backend.start()
 
